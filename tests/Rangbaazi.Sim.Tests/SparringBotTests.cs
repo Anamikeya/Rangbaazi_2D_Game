@@ -126,6 +126,134 @@ public class SparringBotTests
     }
 
     [Fact]
+    public void SavesTheAirJumpWhileAboveTheStageTop()
+    {
+        GameState s = Standing(-5, 5);
+        ref Fighter me = ref s.Fighters[0];
+        me.Position = new FixVec2(Fix.FromInt(11), Fix.FromInt(3)); // off the side, above the top
+        me.Velocity = new FixVec2(Fix.Zero, Fix.FromRatio(-1, 10));
+        me.Grounded = false;
+
+        Assert.Equal(Buttons.Left, SparringBot.Think(s, Rules, 0));
+
+        me.Position = new FixVec2(Fix.FromInt(11), Fix.FromRatio(-1, 10)); // just fell below it
+        Assert.Equal(Buttons.Left | Buttons.Jump, SparringBot.Think(s, Rules, 0));
+    }
+
+    [Fact]
+    public void WaitsAtTheEdgeForAnOpponentOffTheSide()
+    {
+        GameState s = Standing(6, 5);
+        ref Fighter op = ref s.Fighters[1];
+        op.Position = new FixVec2(Fix.FromInt(12), Fix.FromInt(-1)); // recovering, out of reach
+        op.Grounded = false;
+        s.Fighters[0].Facing = 1;
+
+        Assert.Equal(Buttons.Right, SparringBot.Think(s, Rules, 0)); // walks toward the edge...
+
+        s.Fighters[0].Position = new FixVec2(Fix.FromInt(8), Fix.Zero);
+        Assert.Equal(Buttons.None, SparringBot.Think(s, Rules, 0)); // ...and stops 1 m before it
+
+        s.Fighters[0].Position = new FixVec2(Fix.FromRatio(17, 2), Fix.Zero); // overshot: back off
+        Assert.Equal(Buttons.Left, SparringBot.Think(s, Rules, 0));
+    }
+
+    [Fact]
+    public void StillJabsAnOpponentStandingAtTheEdge()
+    {
+        GameState s = Standing(8, 9); // P2 right on the edge, 1 m away
+        int jabs = 0;
+        for (int f = 0; f < 20; f++)
+        {
+            s.Frame = f;
+            if (SparringBot.Think(s, Rules, 0) == Buttons.Light) jabs++;
+        }
+        Assert.True(jabs > 0);
+    }
+
+    [Fact]
+    public void NoAirJabThatWouldDriftOffTheEdge()
+    {
+        // Airborne near the edge, drifting outward, opponent in reach: a jab would lock out
+        // steering for the whole attack and carry it off the stage. Steer back in instead.
+        GameState s = Standing(8, 9);
+        ref Fighter me = ref s.Fighters[0];
+        ref Fighter op = ref s.Fighters[1];
+        me.Position = new FixVec2(Fix.FromRatio(17, 2), Fix.FromInt(1));
+        me.Velocity = new FixVec2(Fix.FromRatio(8, 100), Fix.FromRatio(-1, 10));
+        me.Grounded = false;
+        op.Position = new FixVec2(Fix.FromRatio(19, 2), Fix.FromInt(1)); // 1 m away, facing it
+        op.Grounded = false;
+
+        for (int f = 0; f < 40; f++)
+        {
+            s.Frame = f;
+            Assert.Equal(Buttons.Left, SparringBot.Think(s, Rules, 0));
+        }
+
+        // Airborne over the stage and not drifting: the jab ends over the stage, so it attacks.
+        me.Position = new FixVec2(Fix.FromInt(7), Fix.FromInt(1));
+        me.Velocity = new FixVec2(Fix.Zero, Fix.FromRatio(-1, 10));
+        op.Position = new FixVec2(Fix.FromInt(8), Fix.FromInt(1));
+        Assert.True(JabsWithin40Frames(s));
+
+        // Away from the edge, flying outward at full air speed (0.11 m/frame): the jab carries it
+        // 1.65 m and braking another 0.6 m. From 6.5 m that ends at ~8.75, past the 8.5 m limit...
+        me.Velocity = new FixVec2(Fix.FromRatio(11, 100), Fix.FromRatio(-1, 10));
+        me.Position = new FixVec2(Fix.FromRatio(13, 2), Fix.FromInt(2));
+        op.Position = new FixVec2(Fix.FromRatio(15, 2), Fix.FromInt(2));
+        for (int f = 0; f < 40; f++)
+        {
+            s.Frame = f;
+            Assert.Equal(Buttons.None, SparringBot.Think(s, Rules, 0) & Buttons.Light);
+        }
+
+        // ...from 6.2 m it ends at ~8.45, inside it, so the bot jabs.
+        me.Position = new FixVec2(Fix.FromRatio(31, 5), Fix.FromInt(2));
+        op.Position = new FixVec2(Fix.FromRatio(36, 5), Fix.FromInt(2));
+        Assert.True(JabsWithin40Frames(s));
+    }
+
+    private static bool JabsWithin40Frames(GameState s)
+    {
+        for (int f = 0; f < 40; f++)
+        {
+            s.Frame = f;
+            if (SparringBot.Think(s, Rules, 0) == Buttons.Light) return true;
+        }
+        return false;
+    }
+
+    [Fact]
+    public void WalksOffAFloatingPlatformTowardAnOpponentBelow()
+    {
+        GameState s = Standing(0, 0);
+        ref Fighter me = ref s.Fighters[0];
+        me.Position = new FixVec2(Fix.FromRatio(7, 2), Fix.FromRatio(11, 4)); // right platform, x 2..6
+        me.Facing = -1;
+        ref Fighter op = ref s.Fighters[1];
+
+        op.Position = new FixVec2(Fix.FromRatio(14, 5), Fix.Zero); // below, left of the platform centre
+        Assert.Equal(Buttons.Left, SparringBot.Think(s, Rules, 0));
+
+        op.Position = new FixVec2(Fix.FromRatio(9, 2), Fix.Zero); // below, right of the centre
+        Assert.Equal(Buttons.Right, SparringBot.Think(s, Rules, 0));
+    }
+
+    [Fact]
+    public void JumpsAfterAnOpponentOnAPlatformButNotOneInTheAir()
+    {
+        GameState s = Standing(3, 4);
+        ref Fighter op = ref s.Fighters[1];
+        op.Position = new FixVec2(Fix.FromInt(4), Fix.FromRatio(11, 4)); // standing on the right platform
+        op.Grounded = true;
+        Assert.Equal(Buttons.Jump, SparringBot.Think(s, Rules, 0) & Buttons.Jump);
+
+        op.Grounded = false; // same height, but just jumping
+        Assert.Equal(Buttons.None, SparringBot.Think(s, Rules, 0) & Buttons.Jump);
+    }
+
+    [Fact]
     public void DoesNothingWhileItCannotAct()
     {
         GameState s = Standing(-5, 5);

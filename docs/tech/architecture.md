@@ -21,9 +21,9 @@ This expands GDD Part B9 into the actual repo structure. It is the reference for
 
 | Layer (GDD B9) | Where | Status |
 |---|---|---|
-| 1. Simulation core | `src/Rangbaazi.Sim` | Graybox: movement, jumps, platforms, jab, Josh %, ring-out. `Diagnostics/`: `SparringBot` (test CPU player) and `SmokeScript` |
+| 1. Simulation core | `src/Rangbaazi.Sim` | Graybox: movement, jumps, platforms, jab, Josh %, ring-out. `Diagnostics/`: `SparringBot` (simple CPU player with `CpuLevel` Easy/Normal/Hard, used by tests and the graybox's CPU opponents) and `SmokeScript` |
 | 2. Netcode | `src/Rangbaazi.Net` (to add) | Planned: Backdash P2P session wrapping `Simulation.Advance` |
-| 3. Presentation | `game/` | Graybox scene draws sim state with shapes |
+| 3. Presentation | `game/` | Graybox scene draws sim state with shapes; players 2+ can be CPU-controlled (F2) |
 | 4. Services | `src/Rangbaazi.Social` (+ backend adapters later) | Chat/voice interfaces, safety policy, offline hub |
 | 5. Tools | `tools/`, `game/addons/` (to add) | `tools/godot.ps1` (editor, run, smoke test, record). Planned: move-set editor plugin, Blender export scripts |
 
@@ -70,7 +70,9 @@ Rollback API already supported by the sim:
 | Sim, Social | xUnit, no Godot needed: rules, determinism, rollback re-simulation, banned-API guard | `dotnet test Rangbaazi.sln` |
 | Game (Godot) | In-engine smoke test: `SparringBot`s play `SmokeScript` through synthetic key events. Each frame the buttons read back must equal the buttons the bots pressed. At the end the checksum must equal a pure-sim replay in the same process, and the quick-chat key must have reached the chat hub. An exception, or a match that stops advancing, also fails it, so it never hangs. | `./tools/godot.ps1 smoke` (exit code 0 = pass) |
 
-`SparringBot.Think(state, rules, player)` is a pure function: it reads `GameState` and never writes it or draws from the match RNG (`SparringBotTests.ThinkNeverChangesState`). That makes it safe for rollback and soak tests, and a starting point for training-mode CPUs.
+`SparringBot.Think(state, rules, player, level)` is a pure function: it reads `GameState` and never writes it or draws from the match RNG (`SparringBotTests.ThinkNeverChangesState`). That makes it safe for rollback and soak tests, and a starting point for training-mode CPUs. The level defaults to `Hard`, which is what `SmokeScript` plays.
+
+CPU players are an input source, not sim state. `GrayboxMatch` fills a CPU player's `Buttons` from `SparringBot.Think` on the same pre-advance state as everyone else's, so the sim can't tell CPU input from a person's. Under rollback, each peer recomputes the CPU's buttons from the restored state (`CpuOpponentTests.CpuInputsSurviveRollback`). `CpuOpponentTests` also soak-tests the bot in long free-for-alls, failing if a CPU ever walks or jumps off the stage on its own and loses the stock. It checks that one-on-one CPU matches at every pairing of levels finish, so there are no stand-offs, and that the CPU can reach an opponent wherever they stand: at the stage edge, or under a platform it is on.
 
 ## Godot editor notes
 

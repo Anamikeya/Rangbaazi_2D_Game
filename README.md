@@ -57,7 +57,16 @@ It passes when every frame's buttons read back exactly as the bots pressed them,
 | Heavy *(not wired yet)* | K | Numpad 2 | Y |
 | Dodge *(not wired yet)* | L | Numpad 3 | RB |
 
-F5 restarts the match. T sends a quick-chat line through the local chat hub.
+**Playing alone:** P2 starts as a CPU sparring bot (labelled "P2 CPU"). While it is on, P2's keys and the second gamepad do nothing.
+
+| Key | Does |
+|---|---|
+| F2 | CPU players on/off. Off: P2 is a second person again. |
+| F3 | CPU level: Easy → Normal → Hard. Once you're in reach, Easy waits about 0.25 s on average before jabbing (often less), Normal about 0.1 s, Hard almost at once. Moving and recovering are equally sharp at every level. |
+| F5 | Restart the match (CPU settings stay) |
+| T | Send a quick-chat line through the local chat hub |
+
+The CPU (`Rangbaazi.Sim.Diagnostics.SparringBot`) is a simple graybox bot, not the real AI: it walks at you, jabs when in reach, follows you onto and off platforms and recovers when knocked off. The level changes only how fast it jabs.
 
 ## Repo layout
 

@@ -12,6 +12,7 @@ namespace Rangbaazi.Game.Controls;
 ///   Pads: device N drives player N+1. A jump, X light, Y heavy, RB dodge, B grab, LB drop
 ///   Chat/voice (online only): Enter open chat, T quick-chat wheel, V push-to-talk;
 ///     pad: View/Back quick-chat wheel, R3 push-to-talk
+///   Graybox debug: F2 CPU players on/off, F3 CPU level, F5 restart
 /// </summary>
 public static class InputBindings
 {
@@ -21,6 +22,8 @@ public static class InputBindings
     public static readonly StringName QuickChatWheel = "quick_chat_wheel";
     public static readonly StringName PushToTalk = "push_to_talk";
     public static readonly StringName DebugRestart = "debug_restart";
+    public static readonly StringName DebugToggleCpu = "debug_toggle_cpu";
+    public static readonly StringName DebugCpuLevel = "debug_cpu_level";
 
     private static readonly (Buttons Button, string Suffix)[] Map =
     {
@@ -75,6 +78,8 @@ public static class InputBindings
         AddGlobal(QuickChatWheel, Key.T, JoyButton.Back);
         AddGlobal(PushToTalk, Key.V, JoyButton.RightStick);
         AddGlobal(DebugRestart, Key.F5);
+        AddGlobal(DebugToggleCpu, Key.F2);
+        AddGlobal(DebugCpuLevel, Key.F3);
     }
 
     public static Buttons Read(int player)
