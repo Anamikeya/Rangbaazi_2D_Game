@@ -1,0 +1,16 @@
+<Project>
+  <!--
+    Shared settings for every C# project in the repo (sim, social, tests, and the Godot game).
+    When moving to a newer .NET, bump RangbaaziTargetFramework here AND the literal
+    TargetFramework in game/Rangbaazi.csproj (the Godot editor rewrites that one if it
+    is a property reference). net8.0 matches GodotSharp 4.7.2 (its lib/ folder targets net8.0).
+  -->
+  <PropertyGroup>
+    <RangbaaziTargetFramework>net8.0</RangbaaziTargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,13 @@
+T:System.Math;System.Math is float-based. Use Fix helpers (Fix.Abs, Fix.Min, Fix.Sqrt, ...).
+T:System.MathF;System.MathF is float-based. Use Fix helpers.
+T:System.Random;Not stable across .NET versions. Use Rangbaazi.Sim.SimRandom (seeded, part of GameState).
+P:System.DateTime.Now;Wall-clock time is not allowed in the simulation. Use GameState.Frame.
+P:System.DateTime.UtcNow;Wall-clock time is not allowed in the simulation. Use GameState.Frame.
+P:System.DateTimeOffset.Now;Wall-clock time is not allowed in the simulation. Use GameState.Frame.
+P:System.DateTimeOffset.UtcNow;Wall-clock time is not allowed in the simulation. Use GameState.Frame.
+P:System.Environment.TickCount;Wall-clock time is not allowed in the simulation. Use GameState.Frame.
+P:System.Environment.TickCount64;Wall-clock time is not allowed in the simulation. Use GameState.Frame.
+T:System.Diagnostics.Stopwatch;Wall-clock time is not allowed in the simulation. Use GameState.Frame.
+M:System.Guid.NewGuid;Non-deterministic. Derive IDs from GameState (frame, player index, SimRandom).
+T:System.Threading.Tasks.Task;The simulation is single-threaded and synchronous.
+T:System.HashCode;Seeded randomly per process. Hash state with Rangbaazi.Sim.StateHasher instead.

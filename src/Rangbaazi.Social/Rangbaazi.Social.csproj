@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Text chat + voice chat: game-facing logic and provider interfaces (GDD addendum B10,
+    docs/design/B10-chat-and-voice.md). No engine and no network code here. Backends
+    (Nakama chat, EOS voice, ...) plug in behind IChatService / IVoiceService.
+    Not part of the deterministic sim: chat and voice never touch rollback state.
+  -->
+  <PropertyGroup>
+    <TargetFramework>$(RangbaaziTargetFramework)</TargetFramework>
+    <RootNamespace>Rangbaazi.Social</RootNamespace>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Rangbaazi.Social.Tests" />
+  </ItemGroup>
+</Project>

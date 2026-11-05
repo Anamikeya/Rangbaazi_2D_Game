@@ -1,0 +1,48 @@
+# --- Godot ---
+.godot/
+*.translation
+mono_crash.*.json
+/game/android/build/
+# Editor's backup when it rewrites the csproj; Movie Maker recordings (tools/godot.ps1 record)
+*.csproj.old
+*.avi
+
+# --- .NET ---
+bin/
+obj/
+*.user
+*.suo
+*.DotSettings.user
+.vs/
+TestResults/
+*.trx
+*.coverage
+
+# --- IDEs ---
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# --- Builds / exports ---
+/builds/
+/exports/
+
+# --- Art tools ---
+*.blend1
+*.blend2
+*.kra~
+*.psd~
+
+# --- OS ---
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# --- Game design document: kept locally at the repo root, not in git ---
+/RANGBAAZI*Game Design Document*.pdf
+
+# --- Secrets (never commit) ---
+.env
+*.env
+secrets/

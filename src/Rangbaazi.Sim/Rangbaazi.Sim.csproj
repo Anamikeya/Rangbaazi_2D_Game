@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Deterministic simulation core. Pure C#, no Godot, no floats, no wall-clock, no System.Random.
+    Everything here must produce bit-identical results on every machine so rollback netcode works.
+    See docs/tech/architecture.md ("Determinism rules").
+  -->
+  <PropertyGroup>
+    <TargetFramework>$(RangbaaziTargetFramework)</TargetFramework>
+    <RootNamespace>Rangbaazi.Sim</RootNamespace>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <CheckForOverflowUnderflow>false</CheckForOverflowUnderflow>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="4.14.0" PrivateAssets="all" />
+    <AdditionalFiles Include="BannedSymbols.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Rangbaazi.Sim.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,24 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+  <!--
+    Presentation layer (GDD B9 layer 3): Godot scenes, input, camera, VFX, audio.
+    Gameplay rules live in ../src/Rangbaazi.Sim; this project only reads state and draws it.
+    Keep the Sdk version in sync with the editor (Godot 4.7.2 .NET).
+  -->
+  <PropertyGroup>
+    <!--
+      Must be a literal: the Godot editor rewrites a TargetFramework it can't read
+      (e.g. $(RangbaaziTargetFramework)) and leaves a Rangbaazi.csproj.old backup.
+      Keep it equal to RangbaaziTargetFramework in ../Directory.Build.props.
+    -->
+    <TargetFramework>net8.0</TargetFramework>
+    <!-- Godot's Android export needs net9.0+ -->
+    <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RootNamespace>Rangbaazi.Game</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\src\Rangbaazi.Sim\Rangbaazi.Sim.csproj" />
+    <ProjectReference Include="..\src\Rangbaazi.Social\Rangbaazi.Social.csproj" />
+  </ItemGroup>
+</Project>
