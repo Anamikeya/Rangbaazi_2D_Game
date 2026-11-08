@@ -21,9 +21,9 @@ This expands GDD Part B9 into the actual repo structure. It is the reference for
 
 | Layer (GDD B9) | Where | Status |
 |---|---|---|
-| 1. Simulation core | `src/Rangbaazi.Sim` | Graybox: movement, jumps, platforms, jab, Josh %, ring-out. `Diagnostics/`: `SparringBot` (simple CPU player with `CpuLevel` Easy/Normal/Hard, used by tests and the graybox's CPU opponents) and `SmokeScript` |
+| 1. Simulation core | `src/Rangbaazi.Sim` | Graybox: movement, jumps, platforms, Josh %, ring-out, and combat spec v0.1 (`docs/design/combat-spec-v0.1.md`): jab, four heavies and the ground slam as data (`MoveData`), dodge, parry, hit-stop, Guts. `Diagnostics/`: `SparringBot` (simple CPU player with `CpuLevel` Easy/Normal/Hard, used by tests and the graybox's CPU opponents), `SmokeScript`, and `KoChart` (KO percents per move, for the spec) |
 | 2. Netcode | `src/Rangbaazi.Net` (to add) | Planned: Backdash P2P session wrapping `Simulation.Advance` |
-| 3. Presentation | `game/` | Graybox scene draws sim state with shapes; players 2+ can be CPU-controlled (F2) |
+| 3. Presentation | `game/` | Graybox scene draws sim state with shapes, including hitboxes, dodges, stuns, hit-stop shake and Guts; players 2+ can be CPU-controlled (F2), Guts can be switched off (F4) |
 | 4. Services | `src/Rangbaazi.Social` (+ backend adapters later) | Chat/voice interfaces, safety policy, offline hub |
 | 5. Tools | `tools/`, `game/addons/` (to add) | `tools/godot.ps1` (editor, run, smoke test, record). Planned: move-set editor plugin, Blender export scripts |
 
@@ -38,8 +38,8 @@ Rollback netcode re-simulates frames after late inputs arrive. Every peer must c
 | No `float`, `double` or `decimal`; use `Fix` / `FixVec2` / `FixRect` | `DeterminismGuardTests` (source scan + reflection) |
 | No `System.Math`, `MathF`, `Random`, `HashCode`, `DateTime.Now`, `Stopwatch`, `Guid.NewGuid`, `Task` | `BannedSymbols.txt` + BannedApiAnalyzers (build error RS0030) |
 | Warnings are errors | `TreatWarningsAsErrors` in `Rangbaazi.Sim.csproj` |
-| All mutable state lives in `GameState` (value-type `Fighter`s + `SimRandom`) | Code review; `RollbackResimulationMatchesOriginalTimeline` test |
-| Static data (stages, tuning) is immutable and outside the state | `StageDefinition`, `FighterTuning`, `MatchRules` are init-only |
+| All mutable state lives in `GameState` (value-type `Fighter`s + `SimRandom`) | Reflection tests in `DeterminismTests`. `ChecksumAndCloneCoverEveryFighterField`: `Fighter` holds no references at any depth, and every field changes the checksum and survives `Clone`. `ChecksumAndCloneCoverEveryGameStateField`: the same for `GameState`'s other fields. `CloneSharesNoMutableReferences`: a clone shares no reference-type field (the `Fighters` array). Plus the rollback tests `RollbackResimulationMatchesOriginalTimeline` and `RollbackThroughParriesHitStopAndGutsMatchesTheOriginalTimeline` |
+| Static data (stages, tuning, move frame data) is immutable and outside the state | `StageDefinition`, `FighterTuning`, `MoveData`, `MatchRules` are init-only; a fighter stores only a `MoveId` and a frame count |
 | Gameplay collision is custom AABB, never Godot physics | Sim has no Godot reference |
 | Iterate in fixed order (player index); collect hits first, apply after | `ResolveHits` |
 | Ragdolls, particles, camera and audio are client-only and never feed back into the sim | Presentation only reads `GameState` |
@@ -67,12 +67,12 @@ Rollback API already supported by the sim:
 
 | Layer | How | Command |
 |---|---|---|
-| Sim, Social | xUnit, no Godot needed: rules, determinism, rollback re-simulation, banned-API guard | `dotnet test Rangbaazi.sln` |
+| Sim, Social | xUnit, no Godot needed: rules, determinism, rollback re-simulation, banned-API guard, and `SpecTests`, which keep the combat spec's frame data and KO table equal to the code | `dotnet test Rangbaazi.sln` |
 | Game (Godot) | In-engine smoke test: `SparringBot`s play `SmokeScript` through synthetic key events. Each frame the buttons read back must equal the buttons the bots pressed. At the end the checksum must equal a pure-sim replay in the same process, and the quick-chat key must have reached the chat hub. An exception, or a match that stops advancing, also fails it, so it never hangs. | `./tools/godot.ps1 smoke` (exit code 0 = pass) |
 
 `SparringBot.Think(state, rules, player, level)` is a pure function: it reads `GameState` and never writes it or draws from the match RNG (`SparringBotTests.ThinkNeverChangesState`). That makes it safe for rollback and soak tests, and a starting point for training-mode CPUs. The level defaults to `Hard`, which is what `SmokeScript` plays.
 
-CPU players are an input source, not sim state. `GrayboxMatch` fills a CPU player's `Buttons` from `SparringBot.Think` on the same pre-advance state as everyone else's, so the sim can't tell CPU input from a person's. Under rollback, each peer recomputes the CPU's buttons from the restored state (`CpuOpponentTests.CpuInputsSurviveRollback`). `CpuOpponentTests` also soak-tests the bot in long free-for-alls, failing if a CPU ever walks or jumps off the stage on its own and loses the stock. It checks that one-on-one CPU matches at every pairing of levels finish, so there are no stand-offs, and that the CPU can reach an opponent wherever they stand: at the stage edge, or under a platform it is on.
+CPU players are an input source, not sim state. `GrayboxMatch` fills a CPU player's `Buttons` from `SparringBot.Think` on the same pre-advance state as everyone else's, so the sim can't tell CPU input from a person's. Under rollback, each peer recomputes the CPU's buttons from the restored state (`CpuOpponentTests.CpuInputsSurviveRollback`). `CpuOpponentTests` also soak-tests the bot in long free-for-alls, failing if a CPU ever walks or jumps off the stage on its own and loses the stock. It checks that one-on-one CPU matches at every pairing of levels finish, so there are no stand-offs, that the CPU can reach an opponent wherever they stand (at the stage edge, or under a platform it is on), and that CPU matches use the whole move set: dodges, parries, heavies and the up-heavy recovery.
 
 ## Godot editor notes
 
@@ -92,6 +92,6 @@ See `docs/design/B10-chat-and-voice.md`. Key points:
 ## Next technical steps
 
 1. **Backdash 1v1 prototype** (GDD C3): add `src/Rangbaazi.Net`, wrap `Simulation.Advance` in a Backdash session, test between two PCs.
-2. **Combat spec v0.1**: replace the placeholder jab with data-driven moves (frame data per hero), plus dodge and parry.
-3. **Camera director**: multi-target framing, hit-stop and shake, all on the presentation side.
+2. **Combat, next pass** (v0.1 is in: `docs/design/combat-spec-v0.1.md`): light strings and directional lights, grabs and throws, then Taali and a Signature Scene. Run the C3 blind playtest on v0.1 first, with Guts on and off (F4).
+3. **Camera director**: multi-target framing, plus screen shake and zoom on big hits, all on the presentation side. Hit-stop itself is sim state (`Fighter.HitStop`), so the camera reads it rather than adding its own.
 4. **Headless replay tool**: record inputs and replay them in tests to catch desyncs across builds. The smoke test already compares the in-engine run with a pure-sim replay on one machine; recorded replays would extend that across builds and platforms.

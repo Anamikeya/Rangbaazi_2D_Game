@@ -58,9 +58,11 @@ public class CpuOpponentTests
     }
 
     [Fact]
-    public void LevelOnlyChangesJabTiming()
+    public void LevelOnlyChangesWhenItAttacksAndDodges()
     {
-        // Same state, every level: identical buttons whenever the bot isn't deciding to jab.
+        // Same state, every level: identical buttons whenever neither is attacking or dodging, so
+        // walking, chasing and recovering are the same at every level.
+        const Buttons decisions = Buttons.Light | Buttons.Heavy | Buttons.Dodge;
         GameState s = Simulation.CreateInitialState(Rules, 4, 5);
         var inputs = new Buttons[4];
         var rng = new SimRandom(11);
@@ -72,7 +74,11 @@ public class CpuOpponentTests
                 foreach (CpuLevel level in AllLevels)
                 {
                     Buttons other = SparringBot.Think(s, Rules, p, level);
-                    Assert.Equal(hard & ~Buttons.Light, other & ~Buttons.Light);
+                    // Off the stage it is recovering, which ignores the level: compare everything.
+                    ref readonly Fighter me = ref s.Fighters[p];
+                    FixRect main = Rules.Stage.Platforms[0];
+                    bool off = me.Position.X < main.MinX || me.Position.X > main.MaxX || (!me.Grounded && me.Position.Y < main.MaxY);
+                    if (off || ((hard | other) & decisions) == 0) Assert.Equal(hard, other);
                 }
                 // Mix levels so the match visits many situations.
                 inputs[p] = SparringBot.Think(s, Rules, p, AllLevels[rng.Range(0, AllLevels.Length)]);
@@ -176,15 +182,14 @@ public class CpuOpponentTests
         AssertNoSelfDestructs("mixed", (start, player) => AllLevels[(start + player) % AllLevels.Length]);
 
     /// <summary>
-    /// Three- and four-CPU free-for-alls that check how every lost stock started. A self-destruct
-    /// is a CPU leaving the main stage under its own control (not in hitstun, not hit in the last
-    /// second, not carried faster than it can run) and then losing the stock without being hit
-    /// again. Time since the last hit can't tell these apart from real knockouts, which can take
-    /// over two seconds to fall out of the blast zone.
+    /// Three- and four-CPU free-for-alls that check how every lost stock came about. A CPU that
+    /// loses a stock must have been hit or parried since it last stood on a platform in control
+    /// (idle, at no more than running speed). So walking, jumping, dodging or lunging off the
+    /// stage by itself fails, however fast it was moving, and so does losing a stock after its own
+    /// parry. Being knocked out, including sliding off the edge from a hit, does not.
     /// </summary>
     private static void AssertNoSelfDestructs(string name, Func<int, int, CpuLevel> levelOf)
     {
-        FixRect main = Soak.Stage.Platforms[0];
         int knockouts = 0;
         foreach (int players in new[] { 3, 4 })
         for (int start = 0; start < 8; start++)
@@ -193,14 +198,11 @@ public class CpuOpponentTests
             s.Frame = start * 7919; // the sim doesn't use the seed yet; this varies the bots instead
             var levels = new CpuLevel[players];
             var inputs = new Buttons[players];
-            var lastHit = new int[players];
             var stocks = new int[players];
-            var wasOff = new bool[players];
-            var leftByItself = new bool[players];
+            var knockedAbout = new bool[players]; // hit or parried since it last stood in control
             for (int p = 0; p < players; p++)
             {
                 levels[p] = levelOf(start, p);
-                lastHit[p] = -1000;
                 stocks[p] = s.Fighters[p].Stocks;
             }
 
@@ -213,31 +215,56 @@ public class CpuOpponentTests
                     ref readonly Fighter x = ref s.Fighters[p];
                     if (x.Stocks < stocks[p])
                     {
-                        Assert.False(leftByItself[p],
-                            $"{name}, {players} players, start {start}: P{p + 1} walked or jumped off the stage and lost a stock on frame {f}");
+                        Assert.True(knockedAbout[p],
+                            $"{name}, {players} players, start {start}: P{p + 1} lost a stock on frame {f} without being hit since it last stood on a platform");
                         stocks[p] = x.Stocks;
+                        knockedAbout[p] = false;
                         knockouts++;
                     }
 
-                    if (x.Action == FighterAction.Hitstun)
-                    {
-                        lastHit[p] = f;
-                        leftByItself[p] = false;
-                    }
-
-                    bool off = x.IsActive && (x.Position.X < main.MinX || x.Position.X > main.MaxX
-                        || (!x.Grounded && x.Position.Y < main.MaxY));
-                    if (off && !wasOff[p])
-                    {
-                        leftByItself[p] = x.Action != FighterAction.Hitstun && f - lastHit[p] > 60
-                            && Fix.Abs(x.Velocity.X) <= Soak.Tuning.RunSpeed;
-                    }
-                    if (!off) leftByItself[p] = false;
-                    wasOff[p] = off;
+                    if (x.Action is FighterAction.Hitstun or FighterAction.Stunned) knockedAbout[p] = true;
+                    else if (x.Grounded && x.Action == FighterAction.Idle && Fix.Abs(x.Velocity.X) <= Soak.Tuning.RunSpeed)
+                        knockedAbout[p] = false;
                 }
             }
         }
         Assert.True(knockouts >= 50, $"{name}: only {knockouts} knockouts in the free-for-alls");
+    }
+
+    [Fact]
+    public void CpuMatchesUseTheWholeMoveSet()
+    {
+        // What a person sparring with the CPU should see it do: dodge and parry, punish, throw
+        // heavies, recover with the up heavy and the air dodge. Mixed levels, several starts.
+        int dodges = 0, airDodges = 0, parries = 0, heavies = 0, upHeavies = 0;
+        for (int start = 0; start < 6; start++)
+        {
+            GameState s = Simulation.CreateInitialState(Rules, 2, 1);
+            s.Frame = start * 101;
+            var inputs = new Buttons[2];
+            for (int f = 0; f < 3 * 60 * 60 && !s.MatchOver; f++)
+            {
+                inputs[0] = SparringBot.Think(s, Rules, 0, AllLevels[start % 3]);
+                inputs[1] = SparringBot.Think(s, Rules, 1, CpuLevel.Hard);
+                Fighter[] before = (Fighter[])s.Fighters.Clone();
+                Simulation.Advance(s, Rules, inputs);
+                for (int p = 0; p < 2; p++)
+                {
+                    Fighter x = s.Fighters[p];
+                    bool started = x.ActionFrame == 0 && before[p].Action == FighterAction.Idle;
+                    if (x.Action == FighterAction.Dodge && started)
+                    {
+                        dodges++;
+                        if (!before[p].Grounded) airDodges++;
+                    }
+                    if (x.Action == FighterAction.Stunned && before[p].Action != FighterAction.Stunned) parries++;
+                    if (x.Action == FighterAction.Attack && started && x.Move is MoveId.NeutralHeavy or MoveId.SideHeavy) heavies++;
+                    if (x.Action == FighterAction.Attack && started && x.Move == MoveId.UpHeavy) upHeavies++;
+                }
+            }
+        }
+        Assert.True(dodges > 0 && airDodges > 0 && parries > 0 && heavies > 0 && upHeavies > 0,
+            $"dodges {dodges} (air {airDodges}), parries {parries}, heavies {heavies}, up heavies {upHeavies}");
     }
 
     [Theory, MemberData(nameof(Levels))]
@@ -286,6 +313,61 @@ public class CpuOpponentTests
             }
             Assert.True(s.Fighters[0].Josh > 0, $"{level}: CPU resting at x = {cpuX100 * side} cm never hit P1 at the edge");
         }
+    }
+
+    [Fact]
+    public void ARecoveringCpuThatParriesStillMakesItBack()
+    {
+        // The CPU is below the stage lip with only its air dodge left; an opponent at the edge jabs
+        // around the moment it air-dodges home. Being parried must never cost the CPU its stock.
+        int parries = 0;
+        foreach (int xCm in new[] { -1000, -960, -930 })
+        foreach (int yCm in new[] { -120, -60, -20 })
+        for (int offset = -6; offset <= 6; offset++)
+        {
+            GameState probe = Recovering(xCm, yCm);
+            int dodgeAt = -1;
+            var inputs = new Buttons[2];
+            for (int f = 0; f < 60 && dodgeAt < 0; f++)
+            {
+                inputs[1] = SparringBot.Think(probe, Rules, 1);
+                if ((inputs[1] & Buttons.Dodge) != 0) dodgeAt = f;
+                Simulation.Advance(probe, Rules, inputs);
+            }
+            if (dodgeAt < 0) continue;
+
+            GameState s = Recovering(xCm, yCm);
+            bool hit = false, parried = false;
+            for (int f = 0; f < 400 && s.Fighters[1].Stocks == Rules.Stocks; f++)
+            {
+                inputs[0] = f == dodgeAt + offset ? Buttons.Light : Buttons.None;
+                inputs[1] = SparringBot.Think(s, Rules, 1);
+                Simulation.Advance(s, Rules, inputs);
+                if (s.Fighters[1].Action == FighterAction.Hitstun) hit = true;
+                if (s.Fighters[0].Action == FighterAction.Stunned) parried = true;
+                if (s.Fighters[1].Grounded && s.Fighters[1].Action == FighterAction.Idle) break; // back on the stage
+            }
+            if (parried) parries++;
+            Assert.False(s.Fighters[1].Stocks < Rules.Stocks && !hit,
+                $"CPU at ({xCm}, {yCm}) cm, jab {offset:+0;-0;0} frames from its dodge: lost the stock without being hit (parried: {parried})");
+        }
+        Assert.True(parries > 0, "no parries happened, so the case was never tested");
+    }
+
+    /// <summary>P2 (the CPU) under the left edge of the stage, falling, with only its air dodge left; P1 at the edge facing it.</summary>
+    private static GameState Recovering(int xCm, int yCm)
+    {
+        GameState s = Standing(0, 0);
+        ref Fighter p1 = ref s.Fighters[0];
+        p1.Position = new FixVec2(Fix.FromRatio(-79, 10), Fix.Zero);
+        p1.Facing = -1;
+        ref Fighter cpu = ref s.Fighters[1];
+        cpu.Position = new FixVec2(Fix.FromRatio(xCm, 100), Fix.FromRatio(yCm, 100));
+        cpu.Velocity = new FixVec2(Fix.Zero, Fix.FromRatio(-1, 10));
+        cpu.Grounded = false;
+        cpu.AirJumpsLeft = 0;
+        cpu.RecoveryUsed = true;
+        return s;
     }
 
     [Fact]

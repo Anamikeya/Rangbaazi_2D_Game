@@ -3,8 +3,9 @@ using Rangbaazi.Sim.FixedMath;
 namespace Rangbaazi.Sim;
 
 /// <summary>
-/// Per-hero movement and attack numbers (GDD B4 "Move-set template"). Values are per frame at 60 Hz.
-/// Placeholder numbers for the graybox; the move-set editor will author these per hero later.
+/// Per-hero movement, dodge and attack numbers (GDD B4 "Move-set template"). Values are per frame
+/// at 60 Hz. Placeholder numbers for the graybox; the move-set editor will author these per hero
+/// later. docs/design/combat-spec-v0.1.md explains them.
 /// </summary>
 public sealed class FighterTuning
 {
@@ -21,15 +22,19 @@ public sealed class FighterTuning
     public Fix HalfWidth { get; init; } = Fix.FromRatio(2, 5);
     public Fix Height { get; init; } = Fix.FromRatio(9, 5);
 
-    // Placeholder light attack (jab) used to prove hit -> Josh % -> knockback -> ring-out end to end.
-    public int LightStartup { get; init; } = 4;
-    public int LightActive { get; init; } = 3;
-    public int LightRecovery { get; init; } = 8;
-    public int LightDamage { get; init; } = 6;                        // Josh % added
-    public Fix LightBaseKnockback { get; init; } = Fix.FromRatio(12, 100);
-    public Fix LightKnockbackPerJosh { get; init; } = Fix.FromRatio(3, 1000);
+    // Dodge (GDD B2 combat verbs): 0.3 s invincible, one air dodge per trip into the air, 1 s cooldown.
+    public int DodgeIntangibleFrames { get; init; } = 18;
+    public int DodgeTotalFrames { get; init; } = 24;                   // the last 6 frames can be hit
+    public int DodgeCooldownFrames { get; init; } = 60;                // counted from the end of the dodge
+    public Fix GroundDodgeSpeed { get; init; } = Fix.FromRatio(16, 100); // with a direction; none = spot dodge
+    public Fix AirDodgeSpeed { get; init; } = Fix.FromRatio(16, 100);    // any of 8 directions; none = hang still
 
-    public int LightTotalFrames => LightStartup + LightActive + LightRecovery;
+    // Parry (GDD B2): a dodge timed into a hit. A hit in the first ParryWindowFrames of a dodge is
+    // parried: the attacker is stunned and the defender can act at once.
+    public int ParryWindowFrames { get; init; } = 6;
+    public int ParryStunFrames { get; init; } = 36;
+
+    public MoveSet Moves { get; init; } = MoveSet.AllRounder;
 
     public static readonly FighterTuning Default = new();
 }

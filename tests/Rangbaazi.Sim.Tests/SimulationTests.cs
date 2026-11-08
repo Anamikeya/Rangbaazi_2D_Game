@@ -93,9 +93,9 @@ public class SimulationTests
         s.Fighters[1].Josh = josh;
 
         Run(s, 1, Buttons.Light, Buttons.None);
-        Run(s, Rules.Tuning.LightStartup + 1, Buttons.None, Buttons.None);
+        Run(s, Rules.Tuning.Moves.Jab.Startup + 1 + Simulation.HitStopFrames(Rules.Tuning.Moves.Jab.Damage, Rules), Buttons.None, Buttons.None);
 
-        Assert.Equal(josh + Rules.Tuning.LightDamage, s.Fighters[1].Josh);
+        Assert.Equal(josh + Rules.Tuning.Moves.Jab.Damage, s.Fighters[1].Josh);
         Assert.Equal(FighterAction.Hitstun, s.Fighters[1].Action);
         return s.Fighters[1].Velocity.Length;
     }

@@ -2,7 +2,7 @@
 
 *Working title.* A 2D platform brawler set in a loud, masala-cinema world: up to 8 fighters, grab-anything prop chaos, and Taali-powered "Signature Scene" supers. Local play, online rollback, team modes and (later) a 2D battle royale.
 
-- Game design: `RANGBAAZI — Game Design Document.pdf` (not in git; get it from the team and put it at the repo root, where `.gitignore` keeps it out of commits) and the chat/voice addendum [`docs/design/B10-chat-and-voice.md`](docs/design/B10-chat-and-voice.md)
+- Game design: `RANGBAAZI — Game Design Document.pdf` (not in git; get it from the team and put it at the repo root, where `.gitignore` keeps it out of commits), the combat spec [`docs/design/combat-spec-v0.1.md`](docs/design/combat-spec-v0.1.md) and the chat/voice addendum [`docs/design/B10-chat-and-voice.md`](docs/design/B10-chat-and-voice.md)
 - Tech: [`docs/tech/architecture.md`](docs/tech/architecture.md)
 
 ## Prerequisites
@@ -45,7 +45,7 @@ dotnet build Rangbaazi.sln
 ./tools/godot.ps1 smoke      # headless, ~1 s; exit code 0 = pass
 ```
 
-It passes when every frame's buttons read back exactly as the bots pressed them, the final checksum equals a pure-sim replay of the same script, and the quick-chat key reached the chat hub. It prints one line: `SMOKE PASS frames=900 checksum=<16 hex digits> stocksLost=<n> chatMessages=1`, or `SMOKE FAIL` and the reason. To watch it, record a video (Movie Maker, 60 fps): `./tools/godot.ps1 record -Out "$env:TEMP\smoke.avi"`. Recording opens a real window, so leave the keyboard and gamepads alone until it finishes; they would count as input mismatches.
+Every button the bots can press, Heavy and Dodge included, goes through Godot input. It passes when every frame's buttons read back exactly as the bots pressed them, the final checksum equals a pure-sim replay of the same script, and the quick-chat key reached the chat hub. It prints one line: `SMOKE PASS frames=900 checksum=<16 hex digits> stocksLost=<n> chatMessages=1`, or `SMOKE FAIL` and the reason. To watch it, record a video (Movie Maker, 60 fps): `./tools/godot.ps1 record -Out "$env:TEMP\smoke.avi"`. Recording opens a real window, so leave the keyboard and gamepads alone until it finishes; they would count as input mismatches.
 
 ## Graybox controls
 
@@ -53,20 +53,46 @@ It passes when every frame's buttons read back exactly as the bots pressed them,
 |---|---|---|---|
 | Move | A / D | ← / → | Left stick / D-pad |
 | Jump (x2) | Space | Numpad 0 | A |
-| Light attack | J | Numpad 1 | X |
-| Heavy *(not wired yet)* | K | Numpad 2 | Y |
-| Dodge *(not wired yet)* | L | Numpad 3 | RB |
+| Light attack (jab) | J | Numpad 1 | X |
+| Heavy (+ direction) | K | Numpad 2 | Y |
+| Dodge (+ direction) | L | Numpad 3 | RB |
+| Aim heavies and dodges | W / S (up / down), A / D | ↑ / ↓, ← / → | Left stick / D-pad |
+
+**Combat** (full details, frame data and KO percents: [`docs/design/combat-spec-v0.1.md`](docs/design/combat-spec-v0.1.md)). One action per frame: a jump pressed together with an attack or dodge is ignored.
+
+- **Heavies:** Heavy alone is the neutral heavy. With ← / → it is the side heavy, a lunge that's the main ring-out move. With ↑ it is the up heavy, a rising strike that also works as a recovery once per trip into the air. With ↓ it is a low sweep on both sides, or the ground slam in the air.
+- **Dodge:** 0.3 s of invincibility. On the ground, Dodge alone is a spot dodge and with ← / → it dashes. In the air it dashes in any direction, once per trip into the air. After a dodge you wait 1 s before the next.
+- **Parry:** dodge just as a hit arrives (the dodge's first 6 frames). You take nothing and get your air dodge back. The attacker is stunned for 0.6 s and stops rising, and you can act at once, which is long enough to land a heavy.
+- **Hit-stop:** both fighters freeze for 4-10 frames on a hit, longer for heavier hits.
+- **Guts:** once per stock, if a hit leaves you at 150% or more and you keep that stock for 3 s, you get 30% back and 1 s of armor. Armor means hits still add Josh but don't knock you back. A gold bar under your feet fills during the 3 s, and armor shows as a gold outline.
+
+On screen:
+
+- Hitboxes are red.
+- A dodging fighter is faded, with a white outline while a hit would be parried.
+- A parried fighter is tagged STUN.
+- A fighter frozen by a hit it took shakes, including a hit soaked by Guts armor.
 
 **Playing alone:** P2 starts as a CPU sparring bot (labelled "P2 CPU"). While it is on, P2's keys and the second gamepad do nothing.
 
 | Key | Does |
 |---|---|
 | F2 | CPU players on/off. Off: P2 is a second person again. |
-| F3 | CPU level: Easy → Normal → Hard. Once you're in reach, Easy waits about 0.25 s on average before jabbing (often less), Normal about 0.1 s, Hard almost at once. Moving and recovering are equally sharp at every level. |
-| F5 | Restart the match (CPU settings stay) |
+| F3 | CPU level: Easy → Normal → Hard. Once you're in reach, Easy waits about 0.25 s on average before attacking (often less), Normal about 0.1 s, Hard almost at once. The level also sets which attacks the CPU can react to and how often it dodges them, timed to parry. Easy and Normal react only to the slower heavies, not the up heavy or the jab, and dodge 1 in 4 and 1 in 3 of those. Hard reacts to everything, the jab included, and dodges 1 attack in 2. Moving and recovering are equally sharp at every level. |
+| F4 | Guts rule on/off (restarts the match), to compare the two in playtests |
+| F5 | Restart the match (CPU and Guts settings stay) |
 | T | Send a quick-chat line through the local chat hub |
 
-The CPU (`Rangbaazi.Sim.Diagnostics.SparringBot`) is a simple graybox bot, not the real AI: it walks at you, jabs when in reach, follows you onto and off platforms and recovers when knocked off. The level changes only how fast it jabs.
+The CPU (`Rangbaazi.Sim.Diagnostics.SparringBot`) is a simple graybox bot, not the real AI. It:
+
+- walks at you and jabs when in reach;
+- follows you onto and off platforms;
+- dodges and parries some attacks;
+- punishes with a heavy when it parries you or you whiff a heavy;
+- mixes in heavies once you're at 70% or more;
+- recovers with its air jump, then the up heavy, then an air dodge.
+
+The level changes only how fast it attacks and how it dodges.
 
 ## Repo layout
 

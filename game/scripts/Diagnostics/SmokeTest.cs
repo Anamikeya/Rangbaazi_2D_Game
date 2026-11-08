@@ -32,7 +32,7 @@ public sealed class SmokeTest
     private const int StallTicks = 120;
 
     private static readonly Buttons[] DrivenButtons =
-        { Buttons.Left, Buttons.Right, Buttons.Up, Buttons.Down, Buttons.Jump, Buttons.Light };
+        { Buttons.Left, Buttons.Right, Buttons.Up, Buttons.Down, Buttons.Jump, Buttons.Light, Buttons.Heavy, Buttons.Dodge };
 
     private readonly Buttons[] _wanted = new Buttons[SmokeScript.Players];
     private readonly ulong _physicsFrameAtStart = Engine.GetPhysicsFrames();
