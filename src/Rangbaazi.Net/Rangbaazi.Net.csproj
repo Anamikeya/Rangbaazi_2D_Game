@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Netcode layer (GDD B9 layer 2): online 1v1 over Backdash rollback netcode.
+    Pure C#, no Godot. References the sim; the sim never references this project.
+    Backdash is pinned to 0.7.8-preview, the last release that targets net8.0 (0.8.x is net10.0
+    only). See docs/tech/netcode.md before upgrading: several of its defaults and edge cases are
+    worked around here.
+    Not deterministic code itself (sockets, threads, clocks are fine here), but it only ever feeds
+    the sim inputs that Backdash has agreed on with the other peer.
+  -->
+  <PropertyGroup>
+    <TargetFramework>$(RangbaaziTargetFramework)</TargetFramework>
+    <RootNamespace>Rangbaazi.Net</RootNamespace>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Backdash" Version="0.7.8-preview" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Rangbaazi.Sim\Rangbaazi.Sim.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Rangbaazi.Net.Tests" />
+  </ItemGroup>
+</Project>

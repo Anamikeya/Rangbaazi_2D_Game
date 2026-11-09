@@ -26,6 +26,7 @@ TestResults/
 
 # --- Builds / exports ---
 /builds/
+/build/
 /exports/
 
 # --- Art tools ---

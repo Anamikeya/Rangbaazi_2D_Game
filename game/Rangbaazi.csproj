@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\src\Rangbaazi.Sim\Rangbaazi.Sim.csproj" />
+    <ProjectReference Include="..\src\Rangbaazi.Net\Rangbaazi.Net.csproj" />
     <ProjectReference Include="..\src\Rangbaazi.Social\Rangbaazi.Social.csproj" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!--
+    Online relay for the web and Android builds (browsers cannot use UDP). It pairs two players
+    by room code and forwards their binary game messages verbatim. It holds no game logic and
+    never references the sim. Protocol and deployment notes: README.md in this folder.
+    Runs on a t4g.nano (512 MB), so it uses the workstation GC rather than the server GC.
+  -->
+  <PropertyGroup>
+    <TargetFramework>$(RangbaaziTargetFramework)</TargetFramework>
+    <RootNamespace>Rangbaazi.Relay</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Rangbaazi.Relay.Tests" />
+  </ItemGroup>
+</Project>

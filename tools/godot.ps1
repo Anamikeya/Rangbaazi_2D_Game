@@ -10,6 +10,15 @@
   record  Build, then record the smoke match to -Out (.avi, or .png for a frame sequence),
           relative to the current directory. Windowed: don't touch keyboard or pads meanwhile.
 
+  Online 1v1 (rollback netcode over UDP; see README "Online 1v1"):
+  online        Build, then play online against another PC: -Peer <their IPv4>:<their port>,
+                -Side 1 or 2 (the other player picks the other side), -Port <yours> (7000).
+                Optional: -Delay <input delay frames> (2), -Bot easy|normal|hard (a bot plays you).
+  online-local  Build, then open two windows on this PC talking over 127.0.0.1: you are P1
+                (port 7000), a bot plays P2 (port 7001). -Bot sets its level (normal).
+  online-smoke  Build, then run two headless games with bots that play -Frames frames (900)
+                online over 127.0.0.1. Exit code 0 = both passed and agree on the checksum.
+
   Don't use the "godot" alias that winget adds: it is a symlink, so Godot looks for its
   .NET assemblies next to the link, fails with ".NET: Assemblies not found" and crashes.
   This script finds the real executable. To override, set $env:GODOT to Godot's
@@ -19,11 +28,23 @@
   ./tools/godot.ps1
   ./tools/godot.ps1 smoke
   ./tools/godot.ps1 record -Out "$env:TEMP\smoke.avi"
+  ./tools/godot.ps1 online -Peer 192.168.1.20:7000 -Side 1
+  ./tools/godot.ps1 online-local
+  ./tools/godot.ps1 online-smoke
 #>
 param(
-    [ValidateSet('editor', 'run', 'smoke', 'record')]
+    [ValidateSet('editor', 'run', 'smoke', 'record', 'online', 'online-local', 'online-smoke')]
     [string]$Mode = 'editor',
-    [string]$Out = ''
+    [string]$Out = '',
+    [int]$Port = 7000,
+    [string]$Peer = '',
+    [ValidateSet(0, 1, 2)]
+    [int]$Side = 0,
+    [ValidateRange(0, 7)]
+    [int]$Delay = 2,
+    [ValidateSet('', 'none', 'easy', 'normal', 'hard')]
+    [string]$Bot = '',
+    [int]$Frames = 900
 )
 
 $ErrorActionPreference = 'Stop'
@@ -73,6 +94,12 @@ function Build-Game {
     if ($LASTEXITCODE -ne 0) { throw "C# build failed." }
 }
 
+function Get-OnlineArgs([int]$port, [string]$peer, [int]$side, [string]$bot) {
+    $a = @('--online', '--port', "$port", '--peer', $peer, '--side', "$side", '--delay', "$Delay")
+    if ($bot -and $bot -ne 'none') { $a += @('--bot', $bot) }
+    return $a
+}
+
 $console = Find-GodotConsole
 
 switch ($Mode) {
@@ -105,5 +132,76 @@ switch ($Mode) {
         $godotArgs = @('--path', $project, '--write-movie', $moviePath, '--', '--smoke')
         & $console @godotArgs
         exit $LASTEXITCODE
+    }
+    'online' {
+        if (-not $Peer -or $Side -eq 0) { throw "online needs -Peer <their IPv4>:<their port> and -Side 1 or 2." }
+        Build-Game
+        $godotArgs = @('--path', $project, '--') + (Get-OnlineArgs $Port $Peer $Side $Bot)
+        & $console @godotArgs
+        exit $LASTEXITCODE
+    }
+    'online-local' {
+        Build-Game
+        $botLevel = if ($Bot) { $Bot } else { 'normal' }
+        # P2 in its own window (no console), P1 here with logs in this terminal.
+        $gui = $console -replace '_console\.exe$', '.exe'
+        $p2Args = @('--path', "`"$project`"", '--') + (Get-OnlineArgs 7001 '127.0.0.1:7000' 2 $botLevel)
+        $p2 = Start-Process -FilePath $gui -ArgumentList $p2Args -PassThru
+        try {
+            $godotArgs = @('--path', $project, '--') + (Get-OnlineArgs 7000 '127.0.0.1:7001' 1 '')
+            & $console @godotArgs
+            exit $LASTEXITCODE
+        }
+        finally {
+            if (-not $p2.HasExited) { Stop-Process -Id $p2.Id -ErrorAction SilentlyContinue }
+        }
+    }
+    'online-smoke' {
+        Build-Game
+        $logDir = Join-Path ([IO.Path]::GetTempPath()) "rangbaazi-online-smoke-$PID"
+        New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+        $sides = @(
+            @{ Side = 1; Port = 7100; Peer = '127.0.0.1:7101'; Bot = 'normal' },
+            @{ Side = 2; Port = 7101; Peer = '127.0.0.1:7100'; Bot = 'hard' }
+        )
+        $procs = foreach ($s in $sides) {
+            $a = @('--headless', '--path', "`"$project`"", '--') + (Get-OnlineArgs $s.Port $s.Peer $s.Side $s.Bot) + @('--frames', "$Frames")
+            $p = Start-Process -FilePath $console -ArgumentList $a -PassThru -NoNewWindow `
+                -RedirectStandardOutput (Join-Path $logDir "p$($s.Side).out.txt") `
+                -RedirectStandardError (Join-Path $logDir "p$($s.Side).err.txt")
+            $null = $p.Handle # without this, PowerShell 5.1 never reports the exit code
+            $p
+        }
+        $deadline = (Get-Date).AddSeconds(180)
+        foreach ($p in $procs) {
+            $left = [Math]::Max(1, ($deadline - (Get-Date)).TotalMilliseconds)
+            if (-not $p.WaitForExit([int]$left)) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+        }
+        $ok = $true
+        $checksums = @()
+        foreach ($s in $sides) {
+            $p = $procs[$s.Side - 1]
+            $p.WaitForExit()
+            # Not $out: PowerShell names ignore case, and $Out is this script's [string] parameter.
+            $stdout = Get-Content (Join-Path $logDir "p$($s.Side).out.txt") -ErrorAction SilentlyContinue
+            $stderr = Get-Content (Join-Path $logDir "p$($s.Side).err.txt") -ErrorAction SilentlyContinue
+            $pass = $stdout | Where-Object { $_ -like 'ONLINE SMOKE PASS*' } | Select-Object -Last 1
+            if ($p.ExitCode -ne 0 -or -not $pass) {
+                $ok = $false
+                Write-Host "P$($s.Side) FAILED (exit code $($p.ExitCode)). Last output:"
+                @(@($stdout) + @($stderr) | Where-Object { $_ }) | Select-Object -Last 15 | ForEach-Object { Write-Host "  $_" }
+            }
+            else {
+                Write-Host $pass
+                if ($pass -match 'checksum=([0-9A-F]{16})') { $checksums += $Matches[1] }
+            }
+        }
+        if ($ok -and ($checksums.Count -ne 2 -or $checksums[0] -ne $checksums[1])) {
+            $ok = $false
+            Write-Host "The two games disagree on the checksum at frame ${Frames}: $($checksums -join ' vs ')"
+        }
+        Write-Host ("ONLINE SMOKE " + $(if ($ok) { 'PASS' } else { "FAIL (logs in $logDir)" }))
+        if ($ok) { Remove-Item -Recurse -Force $logDir -ErrorAction SilentlyContinue }
+        exit $(if ($ok) { 0 } else { 1 })
     }
 }

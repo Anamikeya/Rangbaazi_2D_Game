@@ -17,17 +17,19 @@ This expands GDD Part B9 into the actual repo structure. It is the reference for
           │ pure C#        │   │ provider interfaces    │
           └────────────────┘   └────────────────────────┘
           tests/Rangbaazi.Sim.Tests   tests/Rangbaazi.Social.Tests
+
+          game → Rangbaazi.Net → Rangbaazi.Sim (+ Backdash 0.7.8)    tests/Rangbaazi.Net.Tests
 ```
 
 | Layer (GDD B9) | Where | Status |
 |---|---|---|
 | 1. Simulation core | `src/Rangbaazi.Sim` | Graybox: movement, jumps, platforms, Josh %, ring-out, and combat spec v0.1 (`docs/design/combat-spec-v0.1.md`): jab, four heavies and the ground slam as data (`MoveData`), dodge, parry, hit-stop, Guts. `Diagnostics/`: `SparringBot` (simple CPU player with `CpuLevel` Easy/Normal/Hard, used by tests and the graybox's CPU opponents), `SmokeScript`, and `KoChart` (KO percents per move, for the spec) |
-| 2. Netcode | `src/Rangbaazi.Net` (to add) | Planned: Backdash P2P session wrapping `Simulation.Advance` |
-| 3. Presentation | `game/` | Graybox scene draws sim state with shapes, including hitboxes, dodges, stuns, hit-stop shake and Guts; players 2+ can be CPU-controlled (F2), Guts can be switched off (F4) |
+| 2. Netcode | `src/Rangbaazi.Net` | Online 1v1 over Backdash rollback netcode (pinned 0.7.8-preview): our hello handshake (same build and rules, opposite sides), exact desync detection, goodbye messages, a guarded UDP socket in front of Backdash. See [`netcode.md`](netcode.md) |
+| 3. Presentation | `game/` | Graybox scene draws sim state with shapes, including hitboxes, dodges, stuns, hit-stop shake and Guts; players 2+ can be CPU-controlled (F2), Guts can be switched off (F4); online 1v1 with `-- --online ...` (`OnlinePlay`) |
 | 4. Services | `src/Rangbaazi.Social` (+ backend adapters later) | Chat/voice interfaces, safety policy, offline hub |
 | 5. Tools | `tools/`, `game/addons/` (to add) | `tools/godot.ps1` (editor, run, smoke test, record). Planned: move-set editor plugin, Blender export scripts |
 
-Dependency rule: **game → Sim, Social**. Sim and Social never reference Godot or each other.
+Dependency rule: **game → Net, Sim, Social; Net → Sim**. Sim, Net and Social never reference Godot, and Sim never references Net or Social. Backdash is referenced only by Net, so its threads, clocks and floats stay out of the sim.
 
 ## Determinism rules (Rangbaazi.Sim)
 
@@ -51,8 +53,9 @@ Fixed-point format: Q47.16 in a `long` (resolution 1/65536). Multiplication and 
 ```
 Godot _PhysicsProcess (60 Hz)
   └─ read local input → Buttons (16-bit per player)
-  └─ [netcode: exchange inputs, predict remote, roll back on mismatch]   ← Backdash, next
-  └─ Simulation.Advance(state, rules, inputs)
+  └─ online: OnlineMatch.Tick → Backdash exchanges inputs, predicts the remote player,
+     rolls back on a misprediction (LoadState + re-simulate) → Simulation.Advance
+  └─ offline: Simulation.Advance(state, rules, inputs)
   └─ QueueRedraw / update visuals from state
 ```
 
@@ -68,6 +71,8 @@ Rollback API already supported by the sim:
 | Layer | How | Command |
 |---|---|---|
 | Sim, Social | xUnit, no Godot needed: rules, determinism, rollback re-simulation, banned-API guard, and `SpecTests`, which keep the combat spec's frame data and KO table equal to the code | `dotnet test Rangbaazi.sln` |
+| Net | xUnit: codec, fingerprint, wire format, guarded socket, Backdash SyncTest, two matches over an in-memory network with latency/jitter/loss (desync injection, rejections, leave, rematch, disconnect, frozen peer), real UDP. See [`netcode.md`](netcode.md) | `dotnet test Rangbaazi.sln` |
+| Game online (Godot) | Two headless game processes with bots play 900 frames over UDP on 127.0.0.1; both must pass and print the same checksum | `./tools/godot.ps1 online-smoke` |
 | Game (Godot) | In-engine smoke test: `SparringBot`s play `SmokeScript` through synthetic key events. Each frame the buttons read back must equal the buttons the bots pressed. At the end the checksum must equal a pure-sim replay in the same process, and the quick-chat key must have reached the chat hub. An exception, or a match that stops advancing, also fails it, so it never hangs. | `./tools/godot.ps1 smoke` (exit code 0 = pass) |
 
 `SparringBot.Think(state, rules, player, level)` is a pure function: it reads `GameState` and never writes it or draws from the match RNG (`SparringBotTests.ThinkNeverChangesState`). That makes it safe for rollback and soak tests, and a starting point for training-mode CPUs. The level defaults to `Hard`, which is what `SmokeScript` plays.
@@ -91,7 +96,7 @@ See `docs/design/B10-chat-and-voice.md`. Key points:
 
 ## Next technical steps
 
-1. **Backdash 1v1 prototype** (GDD C3): add `src/Rangbaazi.Net`, wrap `Simulation.Advance` in a Backdash session, test between two PCs.
+1. **Online 1v1 between two PCs** (GDD C3): the netcode is in (`src/Rangbaazi.Net`, [`netcode.md`](netcode.md)); play-test it on two PCs, then add an in-game connect screen, hole punching or a relay for internet play, and decide the privacy policy for direct P2P (it shows IP addresses).
 2. **Combat, next pass** (v0.1 is in: `docs/design/combat-spec-v0.1.md`): light strings and directional lights, grabs and throws, then Taali and a Signature Scene. Run the C3 blind playtest on v0.1 first, with Guts on and off (F4).
 3. **Camera director**: multi-target framing, plus screen shake and zoom on big hits, all on the presentation side. Hit-stop itself is sim state (`Fighter.HitStop`), so the camera reads it rather than adding its own.
 4. **Headless replay tool**: record inputs and replay them in tests to catch desyncs across builds. The smoke test already compares the in-engine run with a pure-sim replay on one machine; recorded replays would extend that across builds and platforms.

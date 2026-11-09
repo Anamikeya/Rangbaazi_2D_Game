@@ -2,7 +2,9 @@ using System.Collections.Generic;
 using Godot;
 using Rangbaazi.Game.Controls;
 using Rangbaazi.Game.Diagnostics;
+using Rangbaazi.Game.Online;
 using Rangbaazi.Game.Util;
+using Rangbaazi.Net;
 using Rangbaazi.Sim;
 using Rangbaazi.Sim.Diagnostics;
 using Rangbaazi.Sim.FixedMath;
@@ -22,6 +24,12 @@ namespace Rangbaazi.Game.Graybox;
 /// player is a <see cref="SparringBot"/> at the current <see cref="CpuLevel"/> (F3 cycles it).
 /// The bot only produces that player's buttons from the current state; the sim treats them like
 /// any other input. F4 turns the Guts rule on or off and restarts, for comparing in playtests.
+///
+/// Online 1v1 (<c>-- --online --port 7000 --peer 192.168.1.20:7000 --side 1</c>, see
+/// <see cref="OnlineLaunchOptions"/>): an <see cref="OnlinePlay"/> runs the match over rollback
+/// netcode and this scene draws its state, plus the connection status. The local player always
+/// uses P1's keys and pad; F5 asks for a rematch; the offline debug keys are off, because both
+/// players' rules must match.
 ///
 /// Combat states are drawn from the state alone: hitboxes in red, a dodging fighter faded (with a
 /// white outline while a hit would be parried), a parried fighter with a STUN tag, a fighter frozen
@@ -59,6 +67,12 @@ public partial class GrayboxMatch : Node2D
     private CpuLevel _cpuLevel = CpuLevel.Normal;
     private bool _guts = true;
 
+    private OnlinePlay? _online;
+    private OnlineSmokeTest? _onlineSmoke;
+    private string? _onlineError;
+    private bool _onlineEnded;
+    private int _stalledTicks;
+
     private readonly LocalChatHub _chatHub = new();
     private IChatService _p1Chat = null!;
     private readonly ChatChannelId _lobby = new(ChatChannelKind.Lobby, "graybox");
@@ -71,7 +85,20 @@ public partial class GrayboxMatch : Node2D
         // editor drops settings that equal Godot's defaults (60 is the default today).
         Engine.PhysicsTicksPerSecond = Simulation.TicksPerSecond;
 
-        if (SmokeTest.Requested())
+        string[] args = OS.GetCmdlineUserArgs();
+        bool online = OnlineLaunchOptions.TryParse(args, out OnlineLaunchOptions? launch, out string? onlineError);
+        if (onlineError != null)
+        {
+            _onlineError = onlineError;
+            GD.PushError(onlineError);
+            if (System.Array.IndexOf(args, "--frames") >= 0)
+            {
+                EndOnline(1);
+                return;
+            }
+        }
+
+        if (!online && SmokeTest.Requested())
         {
             _smoke = new SmokeTest();
             _rules = SmokeScript.CreateRules();
@@ -84,7 +111,8 @@ public partial class GrayboxMatch : Node2D
         try
         {
             InputBindings.Register();
-            Restart();
+            if (online) StartOnline(launch!);
+            else Restart();
 
             _p1Chat = _chatHub.Connect(new PlayerId("p1"), "P1", SocialPolicy.Default(AgeBand.Adult));
             _p1Chat.MessageReceived += m =>
@@ -107,8 +135,74 @@ public partial class GrayboxMatch : Node2D
         _inputs = new Buttons[PlayerCount];
     }
 
+    private void StartOnline(OnlineLaunchOptions launch)
+    {
+        PlayerCount = 2;
+        try
+        {
+            _online = new OnlinePlay(launch);
+        }
+        catch (System.Net.Sockets.SocketException e)
+        {
+            _onlineError = $"Couldn't open UDP port {launch.Port} ({e.SocketErrorCode}). Is another copy of the game using it?";
+            GD.PushError(_onlineError);
+            if (launch.SmokeFrames > 0)
+            {
+                EndOnline(1);
+                return;
+            }
+            Restart(); // play offline instead
+            return;
+        }
+        if (launch.SmokeFrames > 0) _onlineSmoke = new OnlineSmokeTest(launch.SmokeFrames);
+        SyncOnlineState();
+        GD.Print($"Online: you are P{launch.Slot + 1} at {_online.YourAddress}; opponent at {launch.Peer}.");
+    }
+
+    private void SyncOnlineState()
+    {
+        _rules = _online!.Match.Rules;
+        _state = _online.Match.State;
+        _inputs = new Buttons[_state.Fighters.Length];
+    }
+
+    private void OnlineStep()
+    {
+        if (_onlineEnded) return;
+        try
+        {
+            _online!.Tick();
+            _state = _online.Match.State;
+            _stalledTicks = _online.Match.Stalled ? _stalledTicks + 1 : 0;
+            if (_onlineSmoke?.Check(_online.Match) is int code) EndOnline(code);
+        }
+        catch (System.Exception e) when (_onlineSmoke != null)
+        {
+            GD.PushError($"ONLINE SMOKE FAIL: exception {e}");
+            EndOnline(1);
+        }
+        QueueRedraw();
+    }
+
+    private void EndOnline(int exitCode)
+    {
+        if (_onlineEnded) return;
+        _onlineEnded = true;
+        _online?.Dispose();
+        SetPhysicsProcess(false);
+        SetProcess(false);
+        GetTree().Quit(exitCode);
+    }
+
+    public override void _ExitTree() => _online?.Dispose();
+
     public override void _PhysicsProcess(double delta)
     {
+        if (_online != null)
+        {
+            OnlineStep();
+            return;
+        }
         if (_smoke == null)
         {
             Step();
@@ -138,7 +232,9 @@ public partial class GrayboxMatch : Node2D
     /// True when this player's buttons come from the CPU. Never in smoke mode: the smoke test
     /// drives every player through real key events.
     /// </summary>
-    private bool IsCpu(int player) => _smoke == null && CpuOpponents && player > 0;
+    private bool IsCpu(int player) => _smoke == null && _online == null && CpuOpponents && player > 0;
+
+    private bool IsLocalOnline(int player) => _online != null && player == _online.Match.LocalSlot;
 
     private void Step()
     {
@@ -163,7 +259,16 @@ public partial class GrayboxMatch : Node2D
 
     public override void _UnhandledInput(InputEvent e)
     {
-        if (_smoke == null)
+        if (_online != null)
+        {
+            // Rules are agreed with the opponent, so only F5 (play again) does anything online.
+            if (e.IsActionPressed(InputBindings.DebugRestart) && _onlineSmoke == null)
+            {
+                _online.Rematch();
+                SyncOnlineState();
+            }
+        }
+        else if (_smoke == null)
         {
             if (e.IsActionPressed(InputBindings.DebugRestart)) Restart();
             if (e.IsActionPressed(InputBindings.DebugToggleCpu)) CpuOpponents = !CpuOpponents;
@@ -189,7 +294,8 @@ public partial class GrayboxMatch : Node2D
         _ => CpuLevel.Easy,
     };
 
-    private string PlayerLabel(int player) => IsCpu(player) ? $"P{player + 1} CPU" : $"P{player + 1}";
+    private string PlayerLabel(int player) =>
+        IsCpu(player) ? $"P{player + 1} CPU" : IsLocalOnline(player) ? $"P{player + 1} YOU" : $"P{player + 1}";
 
     /// <summary>
     /// Draws text centred on <paramref name="centreX"/>. Measures it rather than passing a layout
@@ -272,8 +378,8 @@ public partial class GrayboxMatch : Node2D
         // to each other don't run together.
         float labelY = body.Position.Y - 10;
         DrawCentred(font, $"P{i + 1}", body.GetCenter().X, labelY, 22, c);
-        string? tag = f.ArmorFrames > 0 ? "GUTS!" : f.Action == FighterAction.Stunned ? "STUN" : IsCpu(i) ? "CPU" : null;
-        if (tag != null) DrawCentred(font, tag, body.GetCenter().X, labelY - 22, 15, tag == "CPU" ? c : Gold);
+        string? tag = f.ArmorFrames > 0 ? "GUTS!" : f.Action == FighterAction.Stunned ? "STUN" : IsCpu(i) ? "CPU" : IsLocalOnline(i) ? "YOU" : null;
+        if (tag != null) DrawCentred(font, tag, body.GetCenter().X, labelY - 22, 15, tag is "CPU" or "YOU" ? c : Gold);
     }
 
     private void DrawHud(Font font)
@@ -299,14 +405,28 @@ public partial class GrayboxMatch : Node2D
 
         if (_state.MatchOver)
         {
-            string text = _state.WinnerIndex >= 0 ? $"P{_state.WinnerIndex + 1} WINS!  (F5 to restart)" : "DRAW  (F5 to restart)";
+            string again = _online != null ? "F5 = rematch" : "F5 to restart";
+            string text = _state.WinnerIndex >= 0 ? $"P{_state.WinnerIndex + 1} WINS!  ({again})" : $"DRAW  ({again})";
             DrawString(font, new Vector2(0, size.Y * 0.3f), text, HorizontalAlignment.Center, size.X, 72, Colors.White);
         }
 
         for (int i = 0; i < _chatLog.Count; i++)
             DrawString(font, new Vector2(40, 60 + i * 28), _chatLog[i], HorizontalAlignment.Left, -1, 22, new Color(1, 1, 1, 0.85f));
 
-        if (ShowDebug)
+        if (_online != null) DrawOnlineStatus(font, size);
+        if (_onlineError != null)
+            DrawCentred(font, _onlineError, size.X / 2, 40, 20, new Color("ff6b6b"));
+
+        if (ShowDebug && _online != null)
+        {
+            OnlineMatch m = _online.Match;
+            RollbackStats r = m.Rollbacks;
+            string dbg = $"ONLINE P{m.LocalSlot + 1}   frame {_state.Frame}   final {m.FinalFrame}   ping {m.PingMs} ms   delay {m.Options.InputDelayFrames}   " +
+                $"rollback last {r.Last} max {r.Max} median {r.Median}   behind {m.FramesBehind}   verified {m.ChecksumsVerified}   " +
+                $"checksum {_state.Checksum():X16}   F5 = rematch";
+            DrawString(font, new Vector2(40, size.Y - 110), dbg, HorizontalAlignment.Left, -1, 18, new Color(1, 1, 1, 0.5f));
+        }
+        else if (ShowDebug)
         {
             string dbg = _smoke != null
                 ? $"SMOKE TEST (bots)   frame {_state.Frame}/{SmokeScript.Frames}   checksum {_state.Checksum():X16}"
@@ -314,5 +434,37 @@ public partial class GrayboxMatch : Node2D
                   $"F2 = CPU {(CpuOpponents ? "on" : "off")}   F3 = CPU level: {_cpuLevel}   F4 = Guts {(_guts ? "on" : "off")}   F5 = restart";
             DrawString(font, new Vector2(40, size.Y - 110), dbg, HorizontalAlignment.Left, -1, 18, new Color(1, 1, 1, 0.5f));
         }
+    }
+
+    /// <summary>Connection state over the arena: waiting, connecting, interrupted, or why the match ended.</summary>
+    private void DrawOnlineStatus(Font font, Vector2 size)
+    {
+        OnlineMatch m = _online!.Match;
+        string you = $"You are P{m.LocalSlot + 1}{(_online.BotPlays ? " (bot)" : "")} at {_online.YourAddress}";
+        string? big = null, small = null;
+        switch (m.Phase)
+        {
+            case OnlinePhase.Handshaking:
+                big = "Waiting for your opponent...";
+                small = $"{you}. Connecting to {m.Options.Peer}.";
+                break;
+            case OnlinePhase.Synchronizing:
+                big = $"Connecting... {m.SyncProgress * 100:0}%";
+                small = you;
+                break;
+            case OnlinePhase.Running when m.Interrupted:
+                big = $"Connection interrupted ({m.InterruptSecondsLeft:0.0} s)";
+                break;
+            case OnlinePhase.Running when _stalledTicks > 20:
+                small = "Waiting for your opponent...";
+                break;
+            case OnlinePhase.Ended:
+                big = m.EndMessage;
+                small = "F5 = play again    close the window to quit";
+                break;
+        }
+        float y = size.Y * 0.2f;
+        if (big != null) DrawCentred(font, big, size.X / 2, y, 40, Colors.White);
+        if (small != null) DrawCentred(font, small, size.X / 2, y + 40, 22, new Color(1, 1, 1, 0.8f));
     }
 }
