@@ -653,16 +653,15 @@ const WEB_COPY_JS := """
 """
 
 
-## Phones and tablets on the web: the game is landscape, but a browser follows how the phone is
-## held, and many people keep auto-rotate off. So starting a match goes fullscreen and locks the
-## screen to landscape (Android Chrome; iPhone Safari has no fullscreen for pages, so there the
-## scene asks the player to turn the phone instead). Browsers allow fullscreen only shortly after a
-## tap, so when there was none (a ?room= link opening the page straight into a match) it waits
-## for the next tap.
+## Phones and tablets on the web: the game is played in landscape, but a browser follows how the
+## phone is held, and many people keep auto-rotate off. So landscape is the default: the first tap
+## anywhere (the menu included) goes fullscreen and locks the screen to landscape, and so does the
+## next tap after leaving fullscreen (Android Chrome). Browsers allow fullscreen only during or
+## just after a tap, which is why it waits for one. iPhone Safari has no fullscreen for pages, so
+## there the menu and the match ask the player to turn the phone instead.
 const WEB_LANDSCAPE_JS := """
 (function () {
 	if (window.rangbaaziLandscape) return;
-	var pending = false;
 	function enter() {
 		var page = document.documentElement;
 		if (document.fullscreenElement || !page.requestFullscreen) return;
@@ -671,21 +670,14 @@ const WEB_LANDSCAPE_JS := """
 				if (screen.orientation && screen.orientation.lock) {
 					screen.orientation.lock('landscape').catch(function () {});
 				}
-			}, function () { pending = true; });
-		} catch (e) {
-			pending = true;
-		}
+			}, function () {});
+		} catch (e) {}
 	}
-	window.addEventListener('touchend', function () {
-		if (pending) {
-			pending = false;
-			enter();
-		}
-	}, true);
+	window.addEventListener('touchend', enter, true);
 	window.rangbaaziLandscape = {
+		// Starting a match: in case that came from something other than a touch.
 		request: function () {
-			if (navigator.userActivation && !navigator.userActivation.isActive) pending = true;
-			else enter();
+			if (!navigator.userActivation || navigator.userActivation.isActive) enter();
 		}
 	};
 })();

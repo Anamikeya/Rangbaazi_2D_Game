@@ -20,6 +20,9 @@ var _code_edit: LineEdit
 var _join_button: Button
 var _practice_button: Button
 var _error_label: Label
+## Shown on a phone or tablet held upright: the game is played in landscape (main.gd turns it on
+## the first tap where the browser allows; an iPhone has to be turned by hand).
+var _sideways_hint: Label
 var _center: CenterContainer
 ## Hidden while typing a code on a phone (see COMPACT_HEIGHT).
 var _full_only: Array[Control] = []
@@ -65,6 +68,10 @@ func _ready() -> void:
 	column.add_child(title)
 	var tagline := _label("Rooftop brawls. Knock them off the edge, keep your stocks.", 30, UiTheme.TEXT_DIM)
 	column.add_child(tagline)
+	var sideways := "Turn your phone sideways to play." if OS.has_feature("web_ios") else "Tap anywhere to play in landscape."
+	_sideways_hint = _label(sideways, 34, UiTheme.ACCENT)
+	_sideways_hint.visible = false
+	column.add_child(_sideways_hint)
 	var spacer := _spacer(18)
 	column.add_child(spacer)
 
@@ -108,6 +115,8 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	_set_compact(_typing_on_phone())
+	var upright := size.y > size.x
+	_sideways_hint.visible = upright and TouchControls.handheld() and not _compact
 
 
 ## A tap or click outside the room-code box puts the on-screen keyboard away (clicks on the
