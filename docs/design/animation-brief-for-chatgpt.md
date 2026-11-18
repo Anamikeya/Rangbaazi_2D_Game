@@ -328,7 +328,7 @@ Paste this into the Gemini conversation that finished round-brawler-v6.
 >
 > Shan's and the Portal Ghost's (`akmal`) jab and four heavies have identical key-frame timing. Give the Portal Ghost its own drifting, floaty rhythm without changing its poses.
 >
-> ### 6. Names and two arena owners
+> ### 6. Names
 >
 > - Correct spellings: **Shan** (not Shahn), **Saqlain** (not Saklan) and **Abhipray** (not Avipray).
 > - Four fighters have new names. Each keeps its own look and moves:
@@ -340,7 +340,7 @@ Paste this into the Gemini conversation that finished round-brawler-v6.
 >   | Slime Trickster (`chandan`) | **Akhmal** |
 >   | Precision Ace (`artha`) | **Chandan** |
 >
-> - Two arenas change owner. Akhmal (the Slime Trickster) now owns **Steel Courtyard** (`levels/simran`), and Aastha (the cat) now owns **Slimeworks** (`levels/chandan`). Keep both arenas' art and layouts. Change only the owner in labels, review sheets and any owner text. Portal Playground stays the Portal Ghost's (Simran's), and Sightline City the Precision Ace's (Chandan's).
+> - Every arena stays with the look it was made for. Only the owner's name changes: Slimeworks is Akhmal's (the Slime Trickster), Steel Courtyard is Aastha's (the cat), Portal Playground is Simran's (the Portal Ghost), and Sightline City is Chandan's (the Precision Ace).
 >
 > Fix every name a player can see: the `name` in `characters.json`, review sheets, labels and any text drawn into the art. Keep the folder names and ids (`shahn`, `saklan`, `avipray`, `akmal`, `artha`, `simran`, `chandan`) exactly as they are, because the game finds the files by them.
 >

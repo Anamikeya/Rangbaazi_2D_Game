@@ -123,9 +123,10 @@ NAME_FIX = {"shahn": "Shan", "saklan": "Saqlain", "avipray": "Abhipray",
             "akmal": "Simran", "simran": "Aastha",
             "chandan": "Akhmal", "artha": "Chandan"}
 
-# Each arena belongs to the fighter whose folder it shares, except where the user moved one:
-# Akhmal (the Slime Trickster) owns Steel Courtyard, and Aastha (the cat) owns Slimeworks.
-ARENA_OWNER = {"simran": "chandan", "chandan": "simran"}  # arena folder -> owner's character id
+# Each arena belongs to the fighter it was made for (the one whose folder it shares): Slimeworks
+# to the Slime Trickster (Akhmal), Steel Courtyard to the cat (Aastha). Add an entry here only to
+# give an arena to someone else.
+ARENA_OWNER = {}  # arena folder -> owner's character id
 
 
 def main():
