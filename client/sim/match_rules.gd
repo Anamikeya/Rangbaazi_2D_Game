@@ -22,6 +22,40 @@ var guts_armor_frames := 60
 var min_hit_stop := 4
 var max_hit_stop := 10
 
+## Timed free-for-all (online rooms) when above 0: nobody is ever eliminated, a fighter who leaves
+## the blast zone always respawns, KOs score, and the match ends after this many frames.
+var time_limit_frames := 0
+## A ring-out within this many frames of a fighter's last hit credits that attacker with the KO.
+var ko_credit_frames := 300
+## Comeback "rage": hits do up to rage_percent more damage and knockback, scaling with the
+## attacker's own Josh up to rage_josh. 0 is off.
+var rage_percent := 0
+var rage_josh := 150
+## Hidden second wind: after a respawn, this much incoming damage is absorbed. 0 is off.
+var respawn_shield := 0
+## Prop Boxes drop weapons (Weapons). Off, the match is fists only.
+var weapons := false
+## Each fighter's own weapon, by fighter index (Weapons.signature_for): with it their hits do
+## Weapons.SIGNATURE_PERCENT. Empty or shorter: no signature.
+var signatures: PackedInt32Array = []
+
+
+func signature_of(fighter: int) -> int:
+	return signatures[fighter] if fighter >= 0 and fighter < signatures.size() else Weapons.NONE
+
+
+## A room match (MatchRules.Room): the timed free-for-all with weapons, rage and the hidden
+## second wind.
+static func room(stage_def: StageDefinition, minutes: int, signature_list := PackedInt32Array()) -> MatchRules:
+	var r := MatchRules.new()
+	r.stage = stage_def
+	r.time_limit_frames = minutes * 60 * Simulation.TICKS_PER_SECOND
+	r.rage_percent = 50
+	r.respawn_shield = 20
+	r.weapons = true
+	r.signatures = signature_list
+	return r
+
 
 ## A summary of every setting that affects the match, for the online hello: peers with different
 ## rules (or a different build of the sim) must not play each other.
@@ -29,8 +63,12 @@ func fingerprint() -> int:
 	var h := StateHasher.new()
 	h.add_int(Simulation.SIM_VERSION)
 	for v in [stocks, respawn_frames, max_josh, guts, guts_josh, guts_delay_frames, guts_heal,
-			guts_armor_frames, min_hit_stop, max_hit_stop]:
+			guts_armor_frames, min_hit_stop, max_hit_stop, time_limit_frames, ko_credit_frames,
+			rage_percent, rage_josh, respawn_shield, weapons]:
 		h.add_u64(int(v))
+	h.add_int(signatures.size())
+	for w in signatures:
+		h.add_int(w)
 	tuning.add_to(h)
 	stage.add_to(h)
 	return h.value()

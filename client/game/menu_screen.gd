@@ -1,6 +1,7 @@
 class_name MenuScreen
 extends Control
-## The title menu: practice against the CPU, create an online room, or join one by its code.
+## The title menu: practice against the CPU, host a room for up to 15 players or join one by its
+## code (the server runs those matches), start a 1v1 duel (rollback netcode), or open the settings.
 ## Built from code; large, touch-friendly buttons. The scene (main.gd) listens to the signals.
 ##
 ## On a phone the on-screen keyboard covers the lower half of the screen, where the room-code box
@@ -8,8 +9,11 @@ extends Control
 ## in the top part of the screen. A tap outside the box puts the keyboard away.
 
 signal practice_requested
-signal create_requested
+signal host_requested
+signal create_requested # a 1v1 duel room (OnlineSession)
 signal join_requested(code: String)
+signal settings_requested
+signal fighter_requested
 
 const MIN_CODE := 4
 const MAX_CODE := 8
@@ -17,6 +21,9 @@ const MAX_CODE := 8
 const COMPACT_HEIGHT := 0.42
 
 var _code_edit: LineEdit
+var _name_edit: LineEdit
+var _fighter: ArtPreview
+var _fighter_button: Button
 var _join_button: Button
 var _practice_button: Button
 var _error_label: Label
@@ -62,11 +69,11 @@ func _ready() -> void:
 	column.custom_minimum_size = Vector2(760, 0)
 	_center.add_child(column)
 
-	var title := _label("RANGBAAZI", 150, UiTheme.ACCENT)
+	var title := _label("RANGBAAZI", 120, UiTheme.ACCENT)
 	title.add_theme_constant_override("outline_size", 10)
 	title.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
 	column.add_child(title)
-	var tagline := _label("Rooftop brawls. Knock them off the edge, keep your stocks.", 30, UiTheme.TEXT_DIM)
+	var tagline := _label("Rooftop brawls for up to 15. Knock them off the edge.", 30, UiTheme.TEXT_DIM)
 	column.add_child(tagline)
 	var sideways := "Turn your phone sideways to play." if OS.has_feature("web_ios") else "Tap anywhere to play in landscape."
 	_sideways_hint = _label(sideways, 34, UiTheme.ACCENT)
@@ -75,13 +82,37 @@ func _ready() -> void:
 	var spacer := _spacer(18)
 	column.add_child(spacer)
 
-	_practice_button = _button("Practice vs CPU")
-	_practice_button.pressed.connect(func() -> void: practice_requested.emit())
-	column.add_child(_practice_button)
+	# Your fighter: a live preview and a button, both open the character circle.
+	var fighter_row := HBoxContainer.new()
+	fighter_row.add_theme_constant_override("separation", 20)
+	column.add_child(fighter_row)
+	_fighter = ArtPreview.new()
+	_fighter.custom_minimum_size = Vector2(170, 170)
+	_fighter.fighter_id = GameSettings.character
+	_fighter.pressed.connect(func() -> void: fighter_requested.emit())
+	fighter_row.add_child(_fighter)
+	_fighter_button = _button("")
+	_fighter_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_fighter_button.custom_minimum_size = Vector2(0, 170)
+	_fighter_button.pressed.connect(func() -> void: fighter_requested.emit())
+	fighter_row.add_child(_fighter_button)
+	refresh_fighter()
 
-	var create := _button("Create online room")
-	create.pressed.connect(func() -> void: create_requested.emit())
-	column.add_child(create)
+	_name_edit = LineEdit.new()
+	_name_edit.placeholder_text = "YOUR NAME"
+	_name_edit.max_length = 12
+	_name_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_name_edit.custom_minimum_size = Vector2(0, 100)
+	_name_edit.add_theme_font_size_override("font_size", 40)
+	_name_edit.text = GameSettings.player_name
+	_name_edit.text_changed.connect(func(text: String) -> void:
+		GameSettings.player_name = GameSettings.clean_name(text)
+		GameSettings.save())
+	column.add_child(_name_edit)
+
+	var host := _button("Host a room (up to 15)")
+	host.pressed.connect(func() -> void: host_requested.emit())
+	column.add_child(host)
 
 	var join_row := HBoxContainer.new()
 	join_row.add_theme_constant_override("separation", 20)
@@ -97,11 +128,27 @@ func _ready() -> void:
 	_code_edit.text_changed.connect(_on_code_changed)
 	_code_edit.text_submitted.connect(func(_text: String) -> void: _try_join())
 	join_row.add_child(_code_edit)
-	_join_button = _button("Join room")
+	_join_button = _button("Join")
 	_join_button.custom_minimum_size = Vector2(320, 120)
 	_join_button.disabled = true
 	_join_button.pressed.connect(_try_join)
 	join_row.add_child(_join_button)
+
+	var more := HBoxContainer.new()
+	more.add_theme_constant_override("separation", 20)
+	column.add_child(more)
+	_practice_button = _button("Practice vs CPU")
+	_practice_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_practice_button.pressed.connect(func() -> void: practice_requested.emit())
+	more.add_child(_practice_button)
+	var duel := _button("1v1 duel")
+	duel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	duel.pressed.connect(func() -> void: create_requested.emit())
+	more.add_child(duel)
+	var settings := _button("Settings")
+	settings.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	settings.pressed.connect(func() -> void: settings_requested.emit())
+	more.add_child(settings)
 
 	_error_label = _label("", 28, UiTheme.ERROR)
 	_error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -110,7 +157,7 @@ func _ready() -> void:
 	var keys := _label("Keys: A / D move, W / S aim, Space jump, J light, K heavy, L dodge. Pads and touch work too.", 22, UiTheme.TEXT_DIM)
 	keys.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(keys)
-	_full_only = [title, tagline, spacer, _practice_button, create, keys]
+	_full_only = [title, tagline, spacer, fighter_row, _name_edit, host, more, keys]
 
 
 func _process(_delta: float) -> void:
@@ -122,8 +169,11 @@ func _process(_delta: float) -> void:
 ## A tap or click outside the room-code box puts the on-screen keyboard away (clicks on the
 ## containers come up to here; the buttons and the box take their own).
 func _gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.is_pressed() and _code_edit.has_focus():
-		_code_edit.release_focus()
+	if event is InputEventMouseButton and event.is_pressed():
+		if _code_edit.has_focus():
+			_code_edit.release_focus()
+		if _name_edit.has_focus():
+			_name_edit.release_focus()
 
 
 ## The room-code box has the focus on a phone or tablet, so the on-screen keyboard is likely up.
@@ -152,6 +202,12 @@ func open(message: String = "", focus := true) -> void:
 	show()
 	if focus:
 		_practice_button.grab_focus()
+
+
+## Shows the fighter picked in the character circle.
+func refresh_fighter() -> void:
+	_fighter.fighter_id = GameSettings.character
+	_fighter_button.text = "Fighter: %s   (change)" % ArtLibrary.fighter_name(GameSettings.character)
 
 
 func show_error(message: String) -> void:

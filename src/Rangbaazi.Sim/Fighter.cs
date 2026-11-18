@@ -69,6 +69,30 @@ public struct Fighter
     /// <summary>Frames of Guts armor left: hits still add Josh but cause no knockback or hitstun.</summary>
     public int ArmorFrames;
 
+    /// <summary>Ring-outs credited to this fighter (the timed match's score).</summary>
+    public int Kos;
+
+    /// <summary>Times this fighter has left the blast zone.</summary>
+    public int Falls;
+
+    /// <summary>1 + the index of the fighter who hit this one last, or 0; for KO credit.</summary>
+    public int LastHitBy;
+
+    /// <summary>Frames left in which a ring-out still credits <see cref="LastHitBy"/>.</summary>
+    public int LastHitTimer;
+
+    /// <summary>Hidden second wind: incoming damage absorbed before Josh rises (never shown).</summary>
+    public int Shield;
+
+    /// <summary>The weapon in hand (kept when hit; see Weapons.cs), and its ammo or durability.</summary>
+    public WeaponId Weapon;
+    public int WeaponSupply;
+
+    /// <summary>Uzi bullets fired in this burst (the spread pattern), and the hit streak on one target.</summary>
+    public int UziShots;
+    public int UziStreak;
+    public int UziTarget;   // 1 + the fighter the streak is on, or 0
+
     public readonly bool IsActive => Action != FighterAction.Respawning && Action != FighterAction.Eliminated;
 
     internal readonly void AddTo(ref StateHasher h)
@@ -96,5 +120,15 @@ public struct Fighter
         h.Add(GutsUsed);
         h.Add(GutsTimer);
         h.Add(ArmorFrames);
+        h.Add(Kos);
+        h.Add(Falls);
+        h.Add(LastHitBy);
+        h.Add(LastHitTimer);
+        h.Add(Shield);
+        h.Add((int)Weapon);
+        h.Add(WeaponSupply);
+        h.Add(UziShots);
+        h.Add(UziStreak);
+        h.Add(UziTarget);
     }
 }

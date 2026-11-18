@@ -11,7 +11,8 @@ client/                 standard Godot 4.7.2 project (GL Compatibility renderer:
   game/                 scene: menu, practice vs CPU, online HUD, drawing, keyboard/gamepad/touch input
   tests/                headless tests + golden traces from the C# sim
   export_presets.cfg    "Web" preset (single-threaded: works in every browser, no special headers)
-server/Rangbaazi.Relay  WebSocket relay (C#, ASP.NET Core): pairs two players by room code, forwards their messages
+server/Rangbaazi.Relay  WebSocket server (C#, ASP.NET Core): duel rooms (pairs two players, forwards their messages) and
+                        arena rooms of up to 15 whose match the server runs with the C# sim
 tools/deploy-aws.ps1    builds both and hosts them on AWS (one EC2 t4g.nano; CloudFront + S3 once the account allows it)
 ```
 
@@ -36,6 +37,25 @@ Browsers can't use UDP, so players connect through the **relay** over WebSockets
   - BYE on leave/rematch/desync; timeouts for a silent or frozen opponent.
 - **Tests:** `client/tests/test_rollback.gd` runs two sessions through an in-memory relay (`fake_relay.gd`) with latency and jitter, bots on both sides (in step, replay equal, desync caught, rules refused, leave, rematch, dead link, full room, different input delays). `client/tests/relay_e2e.gd` does the same over real WebSockets against a running relay.
 
+## Rooms of up to 15 (the server runs the match)
+
+The menu's **Host a room** and **Join** use arena rooms (`server/Rangbaazi.Relay/README.md`, "Arena rooms"): the server runs the match with the C# reference sim, and the client (`client/net/room_session.gd`) only sends its buttons and draws the state the server sends every frame, through a 3-frame jitter buffer. Rollback can't scale to 15 players on a phone; this does, and nobody can cheat by changing their own copy of the match. The price is input delay of about one round trip to the server.
+
+- The lobby (`client/game/room_screen.gd`): the host picks 10 to 15 minutes (default 10) and adds CPUs, then starts. `?arena=CODE` in the page's address joins a room.
+- The match: Rookie Rooftops, a timed free-for-all with respawns; ring-outs score a KO for the last attacker (5 s window); the most KOs wins, then fewest falls. Comebacks: **rage** (your hits do up to 50% more damage and knockback as your Josh rises to 150%) and a **hidden second wind** (after a respawn the first 20 damage is absorbed). Quick chat: 16 fixed phrases; the server carries only their numbers.
+- The winner gets a nickname (`client/game/nicknames.gd`), the same on every screen.
+- Settings (`client/game/game_settings.gd`): frame rate 60 / 30, hit shake, hitboxes, debug line, and the player's name, saved in `user://settings.cfg`.
+- Test: `client/tests/room_e2e.gd` (host, guest, CPUs, movement, chat, end) against a running server; the server's own tests are `tests/Rangbaazi.Relay.Tests/ArenaTests.cs`.
+
+## Art: fighters and arenas
+
+The art comes from the art pack (`round-brawler-v6`, made with ChatGPT and Gemini; see `docs/design/animation-brief-for-chatgpt.md`):
+
+- **Stages:** `python tools/gen_arena_stages.py <pack>` turns the 31 arena layouts into `src/Rangbaazi.Sim/ArenaStages.cs` and `client/sim/arena_stages.gd` (the same exact numbers; `client/tests/golden/arena_stages.json` checks it). Shan's arena keeps the id `rooftops`. Rooms and practice can play any of them.
+- **Art:** `python tools/import_art.py <pack>` copies the fighters' rigs and moves (compact JSON), the shared moves and the arenas' painted layers and platform pieces into `client/assets/` (about 18 MB). Images are `.wbin` files (WebP bytes, renamed so Godot doesn't re-import and enlarge them); `client/game/art/art_library.gd` decodes them. The exports include `*.wbin` (`include_filter`).
+- **Drawing:** `client/game/art/fighter_painter.gd` picks each fighter's move from its state and samples the keyframes at the fighter's own action frame (so hit-stop and rollback redraw exactly), swaps faces and drawn extras by slot, and adds springs for hats and antennae. `arena_view.gd` draws the arena's sky, layers and platform art under the sim's platforms.
+- **Screens:** the character circle (`character_circle.gd`: drag to spin, tap to bring a fighter forward), the arena slider (`arena_picker.gd`: swipe the cards or drag the bar), and the lobby (`room_screen.gd`: live previews, sliders for the match length and CPUs). Fighters are cosmetic: every one has the same moves and numbers.
+
 ## Hosting (AWS, ap-south-1)
 
 `tools/deploy-aws.ps1` builds the web game and the relay and hosts them; re-running it updates everything in place. Godot 4 web builds need **https**: on a plain http page the browser hides features they use (a "secure context", AudioWorklet), so the game won't start.
@@ -55,14 +75,32 @@ $godot = "$env:LOCALAPPDATA\Programs\Godot-4.7.2-standard\Godot_v4.7.2-stable_wi
 & $godot --headless --path client -- --smoke                     # scene smoke test (practice, bots)
 dotnet run --project server/Rangbaazi.Relay                       # relay on :8080
 & $godot --headless --path client -s res://tests/relay_e2e.gd -- --relay ws://127.0.0.1:8080
+& $godot --headless --path client -s res://tests/room_e2e.gd -- --relay ws://127.0.0.1:8080
 & $godot --headless --path client --export-release Web ../build/web/index.html
 $env:AWS_PROFILE='Admin'; ./tools/deploy-aws.ps1 -Direct            # host on AWS, prints the link
 ```
 
 Local web test: serve `build/web` (e.g. `python -m http.server -d build/web 8060`) and open `http://127.0.0.1:8060/?relay=ws://127.0.0.1:8080&room=TEST` in two tabs. The `relay` parameter only accepts localhost.
 
+## Android
+
+The same client, exported with the **Android** preset in `client/export_presets.cfg`: package `com.zivotix.rangbaazi`, landscape, arm64-v8a, an APK built without Gradle. Online play uses the relay address in `client/net/relay_base_url.txt` (the deploy script writes it; `wss://13-203-5-192.sslip.io` today), and the copy button shares a link to the web game on that host, so a friend without the app can join from a browser.
+
+Needs, on this PC: the Android SDK (`%LOCALAPPDATA%\Android\Sdk`), a JDK 17+ and Godot 4.7.2's Android export templates; Godot's editor settings point at the SDK, the JDK and its debug keystore.
+
+```powershell
+$g = "$env:LOCALAPPDATA\Programs\Godot-4.7.2-standard\Godot_v4.7.2-stable_win64_console.exe"
+# A test build: release (optimized), signed with Godot's debug key. Not for the Play Store.
+$env:GODOT_ANDROID_KEYSTORE_RELEASE_PATH = "$env:APPDATA\Godot\keystores\debug.keystore"
+$env:GODOT_ANDROID_KEYSTORE_RELEASE_USER = 'androiddebugkey'
+$env:GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD = 'android'
+& $g --headless --path client --export-release Android ../build/android/rangbaazi.apk
+adb install -r build/android/rangbaazi.apk   # Xiaomi phones: approve the prompt on the phone
+```
+
+For the Play Store: create your own upload key (keep it and its password safe, outside the repo), switch on `gradle_build/use_gradle_build` with `gradle_build/export_format` = AAB, and add an app icon (`application/config/icon`).
+
 ## Next
 
-- Android export: needs the Android SDK, a JDK and a keystore; the same client, with the relay address from `client/net/relay_base_url.txt` (written by the deploy script).
 - Port what's left of the C# side (KoChart, spec tests) or drop it, then delete the C# projects.
 - Chat: the C# `Rangbaazi.Social` module isn't ported; the web build has no chat yet.

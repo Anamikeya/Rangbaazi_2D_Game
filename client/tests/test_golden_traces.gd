@@ -13,7 +13,16 @@ func _replay(file_name: String) -> void:
 		return
 	var g: Dictionary = JSON.parse_string(text)
 	var rules := MatchRules.new()
+	var time_limit := int(g.get("time_limit_frames", 0))
+	if time_limit > 0: # a room scenario: MatchRules.room with a short clock
+		rules = MatchRules.room(StageDefinition.by_id(str(g["stage"])), 1)
+		rules.time_limit_frames = time_limit
 	rules.guts = g["guts"]
+	rules.weapons = bool(g.get("weapons", false))
+	var sigs := PackedInt32Array()
+	for w in g.get("signatures", []):
+		sigs.append(int(w))
+	rules.signatures = sigs
 	var players := int(g["players"])
 	var state := Simulation.create_initial_state(rules, players, int(g["seed"]))
 	if not check_eq(StateHasher.hex(state.checksum()), g["initial"], "%s initial checksum" % file_name):
@@ -63,6 +72,35 @@ func test_bots_hard_vs_hard_without_guts() -> void:
 
 func test_bots_easy_vs_normal() -> void:
 	_replay("bots_easy_vs_normal")
+
+
+func test_room_random_inputs_fifteen_players() -> void:
+	_replay("room_random_15p")
+
+
+func test_room_bots_six_players() -> void:
+	_replay("room_bots_6p")
+
+
+func test_weapons_random_inputs_four_players() -> void:
+	_replay("weapons_random_4p")
+
+
+func test_weapons_bots_four_players() -> void:
+	_replay("weapons_bots_4p")
+
+
+func test_arena_stages_match_the_reference() -> void:
+	var text := FileAccess.get_file_as_string("res://tests/golden/arena_stages.json")
+	if not check(text != "", "missing golden arena_stages.json"):
+		return
+	var expected: Dictionary = JSON.parse_string(text)
+	check_eq(expected.size(), ArenaStages.IDS.size(), "arena count")
+	for e: Array in ArenaStages.IDS:
+		var s := ArenaStages.by_id(e[0])
+		var h := StateHasher.new()
+		s.add_to(h)
+		check_eq(StateHasher.hex(h.value()), expected.get(e[0], ""), "arena %s" % e[0])
 
 
 func test_hasher_matches_reference_values() -> void:

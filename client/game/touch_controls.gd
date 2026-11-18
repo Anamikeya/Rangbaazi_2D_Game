@@ -44,6 +44,7 @@ const PAD_BUTTONS := [
 	[Buttons.JUMP, "Jump", 116.0, Vector2(490, 150)],
 	[Buttons.HEAVY, "Heavy", 80.0, Vector2(230, 445)],
 	[Buttons.DODGE, "Dodge", 80.0, Vector2(480, 370)],
+	[Buttons.DROP_WEAPON, "Throw", 64.0, Vector2(410, 560)],
 ]
 
 const FILL := Color(1, 1, 1, 0.13)

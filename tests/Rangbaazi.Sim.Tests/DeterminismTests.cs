@@ -120,7 +120,7 @@ public class DeterminismTests
         const BindingFlags instance = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
         foreach (FieldInfo field in typeof(GameState).GetFields(instance))
         {
-            if (field.Name == nameof(GameState.Fighters)) continue; // covered field by field above
+            if (field.Name is nameof(GameState.Fighters) or nameof(GameState.Props)) continue; // covered field by field
             bool holdsReferences = (bool)typeof(System.Runtime.CompilerServices.RuntimeHelpers)
                 .GetMethod(nameof(System.Runtime.CompilerServices.RuntimeHelpers.IsReferenceOrContainsReferences))!
                 .MakeGenericMethod(field.FieldType).Invoke(null, null)!;
@@ -134,6 +134,33 @@ public class DeterminismTests
             field.SetValue(copy, changed);
             Assert.True(s.Checksum() != copy.Checksum(), $"the checksum ignores GameState.{field.Name}");
             Assert.Equal(copy.Checksum(), copy.Clone().Checksum());
+        }
+    }
+
+    [Fact]
+    public void ChecksumAndCloneCoverEveryPropField()
+    {
+        // Props are rollback state too: a field the checksum or the copy misses would desync peers.
+        const BindingFlags instance = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        Assert.False(System.Runtime.CompilerServices.RuntimeHelpers.IsReferenceOrContainsReferences<Prop>(),
+            "Prop must hold no references, so copying the props array copies all of it");
+        FieldInfo[] fields = typeof(Prop).GetFields(instance);
+        Assert.True(fields.Length >= 15, $"only {fields.Length} fields found");
+        foreach (FieldInfo field in fields)
+        {
+            var s = Simulation.CreateInitialState(Rules, 2, 1);
+            foreach (object changed in Variants(field.FieldType, field.GetValue(s.Props[3])!))
+            {
+                GameState copy = s.Clone();
+                object boxed = copy.Props[3];
+                field.SetValue(boxed, changed);
+                copy.Props[3] = (Prop)boxed;
+                Assert.True(s.Checksum() != copy.Checksum(), $"the checksum ignores Prop.{field.Name}");
+                Assert.Equal(copy.Checksum(), copy.Clone().Checksum());
+                GameState clone = copy.Clone();
+                clone.Props[3].Timer++;
+                Assert.NotEqual(clone.Checksum(), copy.Checksum()); // the clone has its own array
+            }
         }
     }
 

@@ -18,6 +18,18 @@ const PLAYER_COLORS := [
 	Color("1f9bb0"), # peacock blue
 	Color("e0218a"), # rani pink
 	Color("7cb518"), # leaf green
+	Color("ff7a3d"), # saffron
+	Color("8e6cf0"), # lilac
+	Color("2ec4a6"), # mint
+	Color("e8e05a"), # lemon
+	Color("d84a4a"), # brick
+	Color("5aa9e6"), # sky
+	Color("c779d0"), # orchid
+	Color("a0c24a"), # lime
+	Color("f29ec8"), # rose
+	Color("c9a26b"), # sand
+	Color("7fdbff"), # ice
+	Color("ffffff"), # white
 ]
 const PLATFORM_COLOR := Color("3a3a48")
 const PLATFORM_EDGE := Color("e8e6f0")
@@ -74,6 +86,30 @@ var debug_text := ""
 var touch_layout := false
 ## Pixels the stats bar leaves free at the right end of the screen (the scene's menu button).
 var hud_right_inset := 0.0
+## Rooms of up to 15 (RoomSession): names over heads, a clock and a KO scoreboard instead of the
+## stats boxes. time_left_frames is the clock; you_index is the local player's fighter or -1.
+var room_mode := false
+var time_left_frames := 0
+var you_index := -1
+## Quick-chat bubbles over fighters: [{fighter, text, alpha}].
+var bubbles: Array = []
+## Graphics settings (GameSettings): shake on hits, and the red hitboxes.
+var shake_enabled := true
+var show_hitboxes := true
+## Which fighter (one of the 31 art ids) each fighter index is drawn as; empty draws the graybox shapes.
+var fighter_characters: PackedStringArray = []
+
+## The art: one FighterPainter per fighter index (rebuilt when the cast changes), and the arena's
+## painted layers and platforms when the stage has them (ArtLibrary).
+var _painters: Array = []
+var _painter_ids := PackedStringArray()
+## Logical art pixels per metre. The round fighters are drawn a little bigger than their 1.8 m
+## hurtbox (head, hat and hands stick out), so they read well in a room of fifteen.
+const ART_PX_PER_M := 72.0
+## The arena art's level pixels: 40 per metre, x from 640, the floor's top at y = 650.
+const LEVEL_PX_PER_M := 40.0
+const LEVEL_CENTRE_X := 640.0
+const LEVEL_FLOOR_Y := 650.0
 
 ## How many times a match (not just the stage) was drawn. For the scene smoke test only.
 var match_draws := 0
@@ -96,33 +132,58 @@ func _draw() -> void:
 	# The arena fits in the strip under the stats bar, so the bar never hides a fighter. The bar's
 	# room is kept even before a match starts (2 players), so the stage doesn't jump when it does.
 	_bar_bottom = BAR_MARGIN + BOX_HEIGHT * _box_scale(size, state.fighters.size() if state != null else 2)
+	if room_mode:
+		_bar_bottom = BAR_MARGIN + 70.0
 	var strip := size.y - _bar_bottom
 	var metres := TOUCH_VIEW_METRES if touch_layout else VIEW_METRES
-	_ppm = maxf(50.0, minf(size.x / metres.x, strip / metres.y))
-	_origin = Vector2(size.x * 0.5, _bar_bottom + strip * (TOUCH_GROUND_Y if touch_layout else GROUND_Y))
+	var ground := TOUCH_GROUND_Y if touch_layout else GROUND_Y
+	var arena_stage := rules.stage.id != "graybox" and not rules.stage.id.begins_with("test")
+	if arena_stage:
+		# An arena is 32 m wide and 12 m tall: show all of it, the floor near the bottom.
+		metres = Vector2(33, 14.5)
+		ground = 0.8 if touch_layout else 0.88
+	_ppm = minf(size.x / metres.x, strip / metres.y) if arena_stage else maxf(50.0, minf(size.x / metres.x, strip / metres.y))
+	_origin = Vector2(size.x * 0.5, _bar_bottom + strip * ground)
 
-	draw_rect(_screen_rect(rules.stage.blast_zone), Color(1, 1, 1, 0.08), false, 2.0)
-	for platform: FxRect in rules.stage.platforms:
+	var arena := ArtLibrary.arena(rules.stage.id) if arena_stage else {}
+	if arena.is_empty():
+		draw_rect(_screen_rect(rules.stage.blast_zone), Color(1, 1, 1, 0.08), false, 2.0)
+	else:
+		draw_rect(Rect2(Vector2.ZERO, size), Color(str(arena.get("sky", "#1a1626"))))
+		_draw_layers(arena, false)
+	for i in rules.stage.platforms.size():
+		var platform: FxRect = rules.stage.platforms[i]
+		if not arena.is_empty() and _draw_platform_art(arena, i, platform):
+			continue
 		var r := _screen_rect(platform)
 		draw_rect(r, PLATFORM_COLOR)
 		draw_line(r.position, r.position + Vector2(r.size.x, 0), PLATFORM_EDGE, 3.0)
 
 	if state != null:
+		_draw_props(false)
 		for i in state.fighters.size():
 			var f := state.fighters[i]
 			if f.is_active():
 				_draw_fighter(font, f, i)
+				_draw_held_weapon(font, f, i)
+		_draw_props(true)
 		# Hitboxes after every body, so a fighter drawn later doesn't hide the hit landing on it.
 		for f in state.fighters:
-			if not f.is_active():
+			if not f.is_active() or not show_hitboxes:
 				continue
 			var hitbox := Simulation.active_hitbox(f, rules.tuning)
 			if hitbox != null:
 				draw_rect(_screen_rect(hitbox), HITBOX_COLOR)
+		if not arena.is_empty():
+			_draw_layers(arena, true)
+		_draw_bubbles(font)
 		for i in state.fighters.size():
 			if state.fighters[i].is_active():
 				_draw_offscreen_marker(font, state.fighters[i], i, size)
-		_draw_hud(font, size)
+		if room_mode:
+			_draw_room_hud(font, size)
+		else:
+			_draw_hud(font, size)
 		match_draws += 1
 
 	if status_big != "":
@@ -135,6 +196,10 @@ func _draw() -> void:
 
 
 func _draw_fighter(font: Font, f: Fighter, i: int) -> void:
+	var painter := _painter(i)
+	if painter != null:
+		_draw_fighter_art(font, painter, f, i)
+		return
 	var t := rules.tuning
 	var k := _ppm / 50.0 # line widths and offsets grow with the arena
 	var c: Color = PLAYER_COLORS[i % PLAYER_COLORS.size()]
@@ -146,7 +211,7 @@ func _draw_fighter(font: Font, f: Fighter, i: int) -> void:
 	var body := _screen_rect(Simulation.hurtbox(f, t))
 	# Shake while frozen by a hit it took (knocked back or soaked by Guts armor); not when frozen
 	# because its own attack landed or it parried.
-	if f.hit_stop > 0 and f.frozen_by_hit:
+	if f.hit_stop > 0 and f.frozen_by_hit and shake_enabled:
 		body.position.x += (3.0 if state.frame % 2 == 0 else -3.0) * k
 	draw_rect(body, c)
 	if Simulation.in_parry_window(f, t):
@@ -167,6 +232,15 @@ func _draw_fighter(font: Font, f: Fighter, i: int) -> void:
 	# Centred over the body, with the tag on its own line, so labels of fighters standing next to
 	# each other don't run together.
 	var label_y := body.position.y - 10.0
+	if room_mode:
+		# Name and Josh over the head (the room has no stats boxes); yours is marked.
+		var who := names[i] if i < names.size() else "P%d" % (i + 1)
+		_text(font, "%s  %d%%" % [who, f.josh], body.get_center().x, label_y, 22, c)
+		if i == you_index:
+			_text(font, "YOU", body.get_center().x, label_y - 24.0, 18, Color.WHITE)
+		elif f.armor_frames > 0:
+			_text(font, "GUTS!", body.get_center().x, label_y - 24.0, 18, GOLD)
+		return
 	_text(font, "P%d" % (i + 1), body.get_center().x, label_y, 24, c)
 	var tag := tags[i] if i < tags.size() else ""
 	var combat_tag := ""
@@ -314,6 +388,98 @@ func _text(font: Font, text: String, centre_x: float, baseline_y: float, font_si
 	draw_string(font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
 
 
+## How long each weapon is drawn, in metres, by the sim's weapon id.
+const WEAPON_LENGTH := [0.0, 0.95, 1.3, 0.6, 1.15, 0.75, 0.55, 0.95]
+const CRATE := Color("a0672c")
+const CRATE_EDGE := Color("5a3512")
+const BULLET := Color("ffe27a")
+const ARROW := Color("6b4a2a")
+
+
+## A weapon sprite with its grip at `at`, `length` metres long, turned by `angle` (radians; positive
+## turns the tip down, mirrored when facing left).
+func _draw_weapon_sprite(weapon: int, at: Vector2, length: float, angle: float, facing: int, alpha := 1.0) -> void:
+	var tex := ArtLibrary.weapon_texture(weapon)
+	if tex == null:
+		draw_circle(at, length * _ppm * 0.3, Color(GOLD, alpha))
+		return
+	var k := length * _ppm / tex.get_width()
+	var grip := ArtLibrary.weapon_grip(weapon) * Vector2(tex.get_size())
+	draw_set_transform(at, angle * facing, Vector2(k * facing, k))
+	draw_texture(tex, -grip, Color(1, 1, 1, alpha))
+	draw_set_transform_matrix(Transform2D.IDENTITY)
+
+
+## The weapon in a fighter's hand, swung through its attack, and its ammo under the feet.
+func _draw_held_weapon(font: Font, f: Fighter, i: int) -> void:
+	if f.weapon == Weapons.NONE:
+		return
+	var hand := _screen_point(f.pos_x + Fx.ratio(45, 100) * f.facing, f.pos_y + Fx.ONE)
+	var angle := -0.5 # held up and forward
+	var m := Simulation.current_move(f, rules.tuning)
+	if f.weapon == Weapons.BELAN or f.weapon == Weapons.BASEBALL_BAT:
+		if m != null:
+			var af := float(f.action_frame)
+			if af < m.startup:
+				angle = lerpf(-0.5, -2.2, af / maxf(1.0, m.startup))       # wind up, back over the shoulder
+			elif af < m.startup + m.active:
+				angle = lerpf(-2.2, 1.0, (af - m.startup + 1.0) / maxf(1.0, m.active)) # the swing
+			else:
+				angle = lerpf(1.0, -0.5, (af - m.startup - m.active) / maxf(1.0, m.recovery))
+	elif m != null and f.move == MoveData.Id.WEAPON_THROW:
+		angle = -1.6
+	else:
+		angle = 0.0 # guns, the bow, the ball and the bombs point ahead
+	_draw_weapon_sprite(f.weapon, hand, WEAPON_LENGTH[f.weapon], angle, f.facing)
+	if not room_mode or i == you_index:
+		var feet := _screen_point(f.pos_x, f.pos_y)
+		var label: String = Weapons.NAMES[f.weapon] if f.weapon == Weapons.BOWLING_BALL else "%s  %d" % [Weapons.NAMES[f.weapon], f.weapon_supply]
+		_text(font, label, feet.x, feet.y + 26.0, 18, GOLD)
+
+
+## Boxes and loose weapons (behind the fighters), or projectiles (in front of them).
+func _draw_props(shots: bool) -> void:
+	var tick := float(state.frame)
+	for p in state.props:
+		if p.kind == Weapons.PROP_NONE or p.kind == Weapons.PROP_PENDING_BOX:
+			continue
+		if (p.kind == Weapons.PROP_SHOT) != shots:
+			continue
+		var r := _screen_rect(Simulation.prop_box(p))
+		var centre := r.get_center()
+		var dir := -1 if p.vel_x < 0 else 1
+		match p.kind:
+			Weapons.PROP_BOX:
+				draw_rect(r, CRATE)
+				draw_rect(r, CRATE_EDGE, false, maxf(2.0, _ppm * 0.05))
+				draw_line(r.position, r.end, CRATE_EDGE, maxf(1.5, _ppm * 0.03))
+				draw_line(Vector2(r.end.x, r.position.y), Vector2(r.position.x, r.end.y), CRATE_EDGE, maxf(1.5, _ppm * 0.03))
+				_draw_weapon_sprite(p.weapon, centre, 0.55, 0.0, 1)
+			Weapons.PROP_ITEM:
+				var bob := sin(tick * 0.12) * _ppm * 0.06
+				draw_set_transform(Vector2(centre.x, r.end.y), 0.0, Vector2(1.0, 0.3))
+				draw_circle(Vector2.ZERO, _ppm * 0.5, Color(GOLD, 0.35))
+				draw_set_transform_matrix(Transform2D.IDENTITY)
+				_draw_weapon_sprite(p.weapon, centre + Vector2(0, bob), WEAPON_LENGTH[p.weapon] * 0.8, 0.0, 1)
+			Weapons.PROP_SHOT:
+				match p.shot:
+					Weapons.SHOT_ROLL:
+						_draw_weapon_sprite(Weapons.BOWLING_BALL, centre, 0.6, Fx.to_float(p.pos_x) / 0.3, 1)
+					Weapons.SHOT_BULLET:
+						draw_line(centre, centre - Vector2(dir * _ppm * 0.45, 0), BULLET, maxf(2.0, _ppm * 0.06))
+					Weapons.SHOT_ARROW:
+						var tip := centre + Vector2(dir * _ppm * 0.35, 0)
+						draw_line(tip, tip - Vector2(dir * _ppm * 0.75, 0), ARROW, maxf(2.0, _ppm * 0.05))
+						draw_colored_polygon(PackedVector2Array([tip + Vector2(dir * _ppm * 0.12, 0),
+							tip + Vector2(0, -_ppm * 0.07), tip + Vector2(0, _ppm * 0.07)]), Color("d8d8e0"))
+					Weapons.SHOT_BOMB:
+						_draw_weapon_sprite(Weapons.CHERRY_BOMBS, centre, 0.45, 0.0, 1)
+						if int(tick) % 6 < 3:
+							draw_circle(centre + Vector2(0, -_ppm * 0.3), _ppm * 0.08, Color("ffb020"))
+					_:
+						_draw_weapon_sprite(p.weapon, centre, WEAPON_LENGTH[p.weapon] * 0.9, tick * 0.45 * dir, 1)
+
+
 ## Sim position (Fx, y up) to screen pixels (y down). Floats from here on are for drawing only.
 func _screen_point(x: int, y: int) -> Vector2:
 	return Vector2(_origin.x + Fx.to_float(x) * _ppm, _origin.y - Fx.to_float(y) * _ppm)
@@ -323,3 +489,159 @@ func _screen_rect(r: FxRect) -> Rect2:
 	var top_left := _screen_point(r.min_x, r.max_y)
 	var bottom_right := _screen_point(r.max_x, r.min_y)
 	return Rect2(top_left, bottom_right - top_left)
+
+
+## The room's HUD: the clock in the middle, the top KO scorers on the left (and you, if you're not
+## among them), then the result once the clock runs out.
+func _draw_room_hud(font: Font, size: Vector2) -> void:
+	var secs := ceili(time_left_frames / 60.0)
+	var clock := "%d:%02d" % [secs / 60, secs % 60]
+	_text(font, clock, size.x / 2, BAR_MARGIN + 52.0, 54, Color.WHITE if secs > 30 else DANGER)
+
+	var order: Array[int] = []
+	for i in state.fighters.size():
+		order.append(i)
+	order.sort_custom(func(a: int, b: int) -> bool:
+		var fa := state.fighters[a]
+		var fb := state.fighters[b]
+		return fa.kos > fb.kos or (fa.kos == fb.kos and (fa.falls < fb.falls or (fa.falls == fb.falls and a < b))))
+	var shown := order.slice(0, 5)
+	if you_index >= 0 and not shown.has(you_index):
+		shown.append(you_index)
+	var y := _bar_bottom + 34.0
+	# A dark panel behind the list, so it reads over any arena's sky.
+	draw_rect(Rect2(BAR_MARGIN - 10.0, _bar_bottom + 4.0, 330.0, 32.0 * shown.size() + 14.0), Color(0.05, 0.045, 0.07, 0.72))
+	for rank in shown.size():
+		var i: int = shown[rank]
+		var f := state.fighters[i]
+		var who := names[i] if i < names.size() else "P%d" % (i + 1)
+		var line := "%d. %s   KO %d" % [order.find(i) + 1, who, f.kos]
+		var c: Color = PLAYER_COLORS[i % PLAYER_COLORS.size()]
+		draw_string_outline(font, Vector2(BAR_MARGIN, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, 4, OUTLINE)
+		draw_string(font, Vector2(BAR_MARGIN, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, c if i != you_index else Color.WHITE)
+		y += 32.0
+
+	if state.match_over:
+		var winner := state.winner_index
+		var text := "%s WINS!" % (names[winner] if winner >= 0 and winner < names.size() else "P%d" % (winner + 1)) if winner >= 0 else "DRAW"
+		_text(font, text, size.x / 2, size.y * WINNER_Y, 84, Color.WHITE)
+		if over_hint != "":
+			_text(font, over_hint, size.x / 2, size.y * WINNER_Y + 64.0, 40, GOLD)
+
+
+## Quick-chat lines over the fighters who sent them, fading out.
+func _draw_bubbles(font: Font) -> void:
+	for b: Dictionary in bubbles:
+		var i := int(b.get("fighter", -1))
+		if i < 0 or i >= state.fighters.size() or not state.fighters[i].is_active():
+			continue
+		var body := _screen_rect(Simulation.hurtbox(state.fighters[i], rules.tuning))
+		var text := str(b.get("text", ""))
+		var alpha := float(b.get("alpha", 1.0))
+		var width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x
+		var box := Rect2(body.get_center().x - width / 2 - 14.0, body.position.y - 110.0, width + 28.0, 42.0)
+		draw_rect(box, Color(1, 1, 1, 0.92 * alpha))
+		draw_string(font, Vector2(box.position.x + 14.0, box.position.y + 31.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(0.1, 0.09, 0.12, alpha))
+
+
+# ---- the art ----
+
+## The painter for fighter i, or null where the cast isn't known (the graybox shapes are drawn).
+func _painter(i: int) -> FighterPainter:
+	if fighter_characters.is_empty() or i >= fighter_characters.size():
+		return null
+	if _painter_ids != fighter_characters:
+		_painters.clear()
+		for id in fighter_characters:
+			_painters.append(FighterPainter.new(id))
+		_painter_ids = fighter_characters.duplicate()
+	var p: FighterPainter = _painters[i]
+	return p if p.is_ready() else null
+
+
+func _draw_fighter_art(font: Font, painter: FighterPainter, f: Fighter, i: int) -> void:
+	var t := rules.tuning
+	var k := _ppm / 50.0
+	painter.observe(f, state.frame)
+	var feet := _screen_point(f.pos_x, f.pos_y)
+	if f.hit_stop > 0 and f.frozen_by_hit and shake_enabled:
+		feet.x += (3.0 if state.frame % 2 == 0 else -3.0) * k
+	var c: Color = PLAYER_COLORS[i % PLAYER_COLORS.size()]
+	var px := _ppm / ART_PX_PER_M
+	# A coloured disc under the feet says who is who in a crowd of fifteen.
+	draw_set_transform(feet, 0.0, Vector2(1.0, 0.28))
+	draw_circle(Vector2.ZERO, 34.0 * px * 2.2, Color(c, 0.55))
+	draw_set_transform_matrix(Transform2D.IDENTITY)
+	if f.armor_frames > 0:
+		draw_circle(feet + Vector2(0, -90.0 * px), 110.0 * px, Color(GOLD, 0.35))
+	var picked := painter.pick(f, state.frame)
+	var alpha := 0.45 if Simulation.is_intangible(f, t) else 1.0
+	painter.draw(self, feet, px, f.facing, picked[0], picked[1], alpha)
+
+	var label_y := feet.y - 185.0 * px
+	var who := names[i] if i < names.size() else "P%d" % (i + 1)
+	_text(font, "%s  %d%%" % [who, f.josh] if room_mode else "P%d" % (i + 1), feet.x, label_y, 22, c)
+	var tag := "YOU" if i == you_index else (tags[i] if i < tags.size() else "")
+	if f.armor_frames > 0:
+		tag = "GUTS!"
+	elif f.action == Fighter.Action.STUNNED:
+		tag = "STUN"
+	if tag != "":
+		_text(font, tag, feet.x, label_y - 24.0, 18, Color.WHITE if tag == "YOU" else GOLD)
+	if f.guts_timer > 0:
+		var filled := 1.0 - float(f.guts_timer) / rules.guts_delay_frames
+		var bar := Rect2(feet.x - 40.0 * k, feet.y + 8.0 * k, 80.0 * k, 6.0 * k)
+		draw_rect(bar, Color(GOLD, 0.3))
+		draw_rect(Rect2(bar.position, Vector2(bar.size.x * filled, bar.size.y)), GOLD)
+
+
+## Level pixels (the arena art's 1280 x 720 frame) to screen pixels.
+func _level_point(x: float, y: float) -> Vector2:
+	return Vector2(_origin.x + (x - LEVEL_CENTRE_X) / LEVEL_PX_PER_M * _ppm, _origin.y - (LEVEL_FLOOR_Y - y) / LEVEL_PX_PER_M * _ppm)
+
+
+## The painted layers behind the fighters (z < 0), or in front of them (z > 0).
+func _draw_layers(arena: Dictionary, front: bool) -> void:
+	var stage_id := rules.stage.id
+	for layer: Dictionary in arena.get("layers", []):
+		if (float(layer.get("z", 0)) > 0.0) != front:
+			continue
+		var tex := ArtLibrary.arena_texture(stage_id, str(layer["file"]))
+		if tex == null:
+			continue
+		var x := float(layer.get("x", 0))
+		var y := float(layer.get("y", 0))
+		var top_left := _level_point(x, y)
+		var bottom_right := _level_point(x + float(layer.get("w", 1280)), y + float(layer.get("h", 720)))
+		draw_texture_rect(tex, Rect2(top_left, bottom_right - top_left), false)
+
+
+## One platform in its arena's art: left cap, tiled middle, right cap, the art hanging below the
+## collision top. False if the arena has no pieces for it (the plain shape is drawn instead).
+func _draw_platform_art(arena: Dictionary, index: int, platform: FxRect) -> bool:
+	var kinds: Array = arena.get("platforms", [])
+	if index >= kinds.size():
+		return false
+	var piece: Dictionary = arena.get("pieces", {}).get(kinds[index], {})
+	if piece.is_empty():
+		return false
+	var stage_id := rules.stage.id
+	var left := ArtLibrary.arena_texture(stage_id, str(piece.get("left", "")))
+	var middle := ArtLibrary.arena_texture(stage_id, str(piece.get("middle", "")))
+	var right := ArtLibrary.arena_texture(stage_id, str(piece.get("right", "")))
+	if left == null or middle == null or right == null:
+		return false
+	var r := _screen_rect(platform)
+	var scale := _ppm / LEVEL_PX_PER_M # screen pixels per level pixel
+	var cap := float(piece.get("cap", 20)) * scale
+	var tile := float(piece.get("tile", 72)) * scale
+	var h := maxf(r.size.y, cap * left.get_height() / maxf(1.0, left.get_width()))
+	draw_texture_rect(left, Rect2(r.position.x, r.position.y, cap, h), false)
+	draw_texture_rect(right, Rect2(r.end.x - cap, r.position.y, cap, h), false)
+	var x := r.position.x + cap
+	var end := r.end.x - cap
+	while x < end - 0.5:
+		var w := minf(tile, end - x)
+		draw_texture_rect_region(middle, Rect2(x, r.position.y, w, h), Rect2(0, 0, middle.get_width() * w / tile, middle.get_height()))
+		x += w
+	return true

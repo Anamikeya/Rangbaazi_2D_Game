@@ -20,6 +20,9 @@ func get_move(id: int) -> MoveData:
 		MoveData.Id.UP_HEAVY: return up_heavy
 		MoveData.Id.DOWN_HEAVY: return down_heavy
 		MoveData.Id.GROUND_SLAM: return ground_slam
+	var weapon_move := Weapons.move_for(id)
+	if weapon_move != null:
+		return weapon_move
 	push_error("No move data for move %d" % id)
 	return null
 

@@ -371,6 +371,8 @@ if ($Direct) {
         try { $ok = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 "https://$siteHost/relay/health").Content -eq 'ok' } catch { Start-Sleep -Seconds 5 }
     }
     if (-not $ok) { Write-Warning "https://$siteHost/ isn't answering yet; Caddy may still be getting its certificate (check: journalctl -u caddy)." }
+    # Android and desktop builds have no page address to derive the relay from; give them this one.
+    [IO.File]::WriteAllText((Join-Path $repo 'client\net\relay_base_url.txt'), "wss://$siteHost`n", $utf8)
     Write-Host ''
     Write-Host "Play: https://$siteHost/" -ForegroundColor Green
     Write-Host "Online room link: https://$siteHost/?room=<CODE>"

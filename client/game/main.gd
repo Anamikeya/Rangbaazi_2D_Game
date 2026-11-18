@@ -14,11 +14,15 @@ extends Node2D
 ##   draws session.state and the connection status. R / F5 / Play again / Rematch plays again
 ##   once a match is over (someone won, or the session ended); Esc or the panel's Leave leaves.
 ##   The panel can't pause an online match: it says so.
+## MENU -> HOST / JOIN A ROOM: rooms of up to 15 players whose match the server runs (RoomSession).
+##   The lobby (RoomScreen) shows who's in; the host picks 10 to 15 minutes, adds CPUs and starts.
+##   In the match the chat button opens the quick-chat phrases. The server returns everyone to the
+##   lobby after the result. A page opened with ?arena=CODE joins that room.
 ## A "Play again" button shows in the middle once a match is over.
 ## `-- --smoke` runs the headless scene check instead (see SceneSmoke). `-- --touch` forces the
 ## touch controls on (and lets the mouse act as a finger) for testing them on a desktop.
 
-enum Mode { MENU, PRACTICE, ONLINE }
+enum Mode { MENU, PRACTICE, ONLINE, ROOM }
 
 const ONLINE_SESSION_PATH := "res://net/online_session.gd"
 ## What this scene calls on an OnlineSession; a script without them counts as missing.
@@ -57,6 +61,24 @@ var _share_link := ""
 var _copied_until_msec := 0 # the copy button says "Copied!" until then
 var _web_copy_target := "" # what _sync_web_copy last told the page ("" = button hidden)
 
+# Rooms of up to 15 (the server runs the match).
+var _room_session: RoomSession
+var _room_screen: RoomScreen
+var _room_host := false
+var _room_tries := 0
+var _settings_screen: SettingsScreen
+var _chat_button: Button
+var _chat_layer: CanvasLayer
+var _end_match_button: Button
+# The pickers: the character circle and the arena slider (layer 7, over everything).
+var _circle: CharacterCircle
+var _arena_picker: ArenaPicker
+var _picker_for := "" # "practice" or "room": what the arena slider's pick is for
+var _cpu_character := "akshat"
+var _sound: SoundDirector
+const CHAT_BUBBLE_TICKS := 180
+const HOST_RETRIES := 3
+
 var _smoke: SceneSmoke
 var _smoke_done := false
 
@@ -89,6 +111,8 @@ func _ready() -> void:
 	if SceneSmoke.requested():
 		_smoke = SceneSmoke.new() # first, so it counts errors from here on
 	InputReader.register()
+	GameSettings.load_settings()
+	GameSettings.apply()
 	_rng.randomize()
 	_prefer_touch = TouchControls.wanted() and _smoke == null
 	if TouchControls.forced():
@@ -104,9 +128,15 @@ func _ready() -> void:
 	var code := _room_from_url()
 	if code != "":
 		_start_online(code)
+	var arena_code := _url_param("arena")
+	if arena_code != "" and MenuScreen.is_valid_code(arena_code):
+		_start_room(arena_code, false)
 
 
 func _build_nodes() -> void:
+	_sound = SoundDirector.new()
+	_sound.name = "Sound"
+	add_child(_sound)
 	_arena = ArenaView.new()
 	_arena.name = "Arena"
 	add_child(_arena)
@@ -135,6 +165,13 @@ func _build_nodes() -> void:
 	_again_button.custom_minimum_size = Vector2(380, 110)
 	_again_button.add_theme_font_size_override("font_size", 40)
 	_copy_button = _hud_button(_hud, "Copy link", _on_copy)
+	_chat_button = _hud_button(_hud, "Chat", _open_chat)
+	_chat_button.custom_minimum_size = Vector2(MENU_BUTTON * 1.6, MENU_BUTTON)
+	_chat_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_chat_button.offset_left = -(MENU_MARGIN * 2 + MENU_BUTTON + MENU_BUTTON * 1.6)
+	_chat_button.offset_right = -(MENU_MARGIN * 2 + MENU_BUTTON)
+	_chat_button.offset_top = MENU_MARGIN
+	_chat_button.offset_bottom = MENU_MARGIN + MENU_BUTTON
 
 	var touch_layer := CanvasLayer.new()
 	touch_layer.name = "Touch"
@@ -145,6 +182,50 @@ func _build_nodes() -> void:
 	touch_layer.add_child(_touch)
 
 	_build_panel()
+	_build_chat()
+
+	var room_layer := CanvasLayer.new()
+	room_layer.name = "Room"
+	room_layer.layer = 3
+	add_child(room_layer)
+	_room_screen = RoomScreen.new()
+	_room_screen.visible = false
+	room_layer.add_child(_room_screen)
+	_room_screen.minutes_changed.connect(func(m: int) -> void:
+		if _room_session != null: _room_session.set_minutes(m))
+	_room_screen.bots_changed.connect(func(n: int) -> void:
+		if _room_session != null: _room_session.set_bots(n))
+	_room_screen.start_pressed.connect(func() -> void:
+		if _room_session != null: _room_session.start_match())
+	_room_screen.leave_pressed.connect(_go_to_menu.bind(""))
+
+	var picker_layer := CanvasLayer.new()
+	picker_layer.name = "Pickers"
+	picker_layer.layer = 7
+	add_child(picker_layer)
+	_circle = CharacterCircle.new()
+	_circle.visible = false
+	picker_layer.add_child(_circle)
+	_circle.chosen.connect(_on_fighter_chosen)
+	_circle.cancelled.connect(func() -> void: _circle.hide())
+	_arena_picker = ArenaPicker.new()
+	_arena_picker.visible = false
+	picker_layer.add_child(_arena_picker)
+	_arena_picker.chosen.connect(_on_arena_chosen)
+	_arena_picker.cancelled.connect(func() -> void: _arena_picker.hide())
+	_room_screen.fighter_requested.connect(func() -> void: _circle.open(GameSettings.character))
+	_room_screen.arena_requested.connect(func() -> void:
+		if _room_session != null and _room_session.is_host():
+			_picker_for = "room"
+			_arena_picker.open(_room_session.stage_id, "Use this arena"))
+
+	var settings_layer := CanvasLayer.new()
+	settings_layer.name = "Settings"
+	settings_layer.layer = 6
+	add_child(settings_layer)
+	_settings_screen = SettingsScreen.new()
+	_settings_screen.visible = false
+	settings_layer.add_child(_settings_screen)
 
 	var menu_layer := CanvasLayer.new()
 	menu_layer.name = "Menu"
@@ -152,9 +233,16 @@ func _build_nodes() -> void:
 	add_child(menu_layer)
 	_menu = MenuScreen.new()
 	menu_layer.add_child(_menu)
-	_menu.practice_requested.connect(_start_practice)
+	_menu.practice_requested.connect(func() -> void:
+		_picker_for = "practice"
+		_arena_picker.open(GameSettings.arena, "Fight here"))
+	_menu.fighter_requested.connect(func() -> void: _circle.open(GameSettings.character))
 	_menu.create_requested.connect(func() -> void: _start_online(_new_room_code()))
-	_menu.join_requested.connect(_start_online)
+	_menu.host_requested.connect(func() -> void:
+		_room_tries = 0
+		_start_room(_new_room_code(), true))
+	_menu.join_requested.connect(func(code: String) -> void: _start_room(code, false))
+	_menu.settings_requested.connect(func() -> void: _settings_screen.open())
 
 
 ## A HUD button: never takes keyboard focus, so Space and the arrows stay with the fighters.
@@ -234,6 +322,10 @@ func _build_panel() -> void:
 	_rematch_button = _panel_button(column, "Rematch", func() -> void:
 		_on_rematch()
 		_close_panel())
+	_end_match_button = _panel_button(column, "End match for everyone", func() -> void:
+		if _room_session != null:
+			_room_session.end_match()
+		_close_panel())
 	_panel_button(column, "Leave match", _go_to_menu.bind(""))
 
 
@@ -264,10 +356,58 @@ func _close_panel() -> void:
 	_refresh()
 
 
+## The quick-chat panel: a grid of the phrases (RoomSession.PHRASES); a tap sends one and closes it.
+func _build_chat() -> void:
+	_chat_layer = CanvasLayer.new()
+	_chat_layer.name = "Chat"
+	_chat_layer.layer = 5
+	_chat_layer.visible = false
+	add_child(_chat_layer)
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.theme = UiTheme.build()
+	_chat_layer.add_child(root)
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.05, 0.045, 0.07, 0.55)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.gui_input.connect(func(event: InputEvent) -> void:
+		var mouse := event as InputEventMouseButton
+		if mouse != null and mouse.pressed and mouse.button_index == MOUSE_BUTTON_LEFT:
+			_close_chat())
+	root.add_child(backdrop)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(center)
+	var grid := GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 16)
+	grid.add_theme_constant_override("v_separation", 16)
+	center.add_child(grid)
+	for i in RoomSession.PHRASES.size():
+		var b := _hud_button(grid, RoomSession.PHRASES[i], func() -> void:
+			if _room_session != null:
+				_room_session.say(i)
+			_close_chat())
+		b.custom_minimum_size = Vector2(380, 96)
+
+
+func _open_chat() -> void:
+	if _mode == Mode.ROOM:
+		_chat_layer.show()
+		_update_touch()
+
+
+func _close_chat() -> void:
+	_chat_layer.hide()
+	_update_touch()
+
+
 ## The touch controls show in a match where wanted, and hide while the panel is open (so a tap on
 ## the panel's buttons can't also press a fighter's).
 func _update_touch() -> void:
-	var want := _mode != Mode.MENU and _prefer_touch and not _panel_open()
+	var in_match := _mode != Mode.ROOM or (_room_session != null and _room_session.phase == RoomSession.Phase.PLAYING)
+	var want := _mode != Mode.MENU and in_match and _prefer_touch and not _panel_open() and not _chat_layer.visible
 	if _touch.visible != want:
 		_touch.visible = want
 
@@ -276,6 +416,7 @@ func _update_touch() -> void:
 
 func _go_to_menu(message: String = "") -> void:
 	_close_session()
+	_close_room()
 	_mode = Mode.MENU
 	_state = null
 	_panel_layer.hide()
@@ -287,6 +428,7 @@ func _go_to_menu(message: String = "") -> void:
 
 func _start_practice() -> void:
 	_close_session()
+	_close_room()
 	_mode = Mode.PRACTICE
 	_restart_practice()
 	_enter_game()
@@ -295,6 +437,18 @@ func _start_practice() -> void:
 ## A new practice match with the current CPU and Guts settings.
 func _restart_practice() -> void:
 	_rules = MatchRules.new()
+	_rules.weapons = true
+	if _smoke == null:
+		var arena := StageDefinition.by_id(GameSettings.arena)
+		if arena != null:
+			_rules.stage = arena
+		# The CPU plays a different fighter each match.
+		var ids := ArtLibrary.fighters().map(func(f: Dictionary) -> String: return str(f["id"]))
+		ids.erase(GameSettings.character)
+		if not ids.is_empty():
+			_cpu_character = ids[_rng.randi_range(0, ids.size() - 1)]
+		# Each fighter's own weapon hits a little harder for them.
+		_rules.signatures = PackedInt32Array([Weapons.signature_for(GameSettings.character), Weapons.signature_for(_cpu_character)])
 	_rules.guts = _guts
 	var match_seed: int = SceneSmoke.SEED if _smoke != null else _rng.randi()
 	_state = Simulation.create_initial_state(_rules, PLAYERS, match_seed)
@@ -303,6 +457,7 @@ func _restart_practice() -> void:
 
 func _start_online(code: String) -> void:
 	_close_session()
+	_close_room()
 	var script := _online_script()
 	if script == null:
 		_go_to_menu("Online play isn't available in this build.")
@@ -317,8 +472,53 @@ func _start_online(code: String) -> void:
 	_room = code
 	_stalled_ticks = 0
 	_copied_until_msec = 0
-	_share_link = _make_share_link(code)
+	_share_link = _make_share_link(code, url)
 	_enter_game()
+
+
+func _on_fighter_chosen(id: String) -> void:
+	_sound.cheer(id) # each fighter's own jingle when you pick them
+	GameSettings.character = id
+	GameSettings.save()
+	_circle.hide()
+	_menu.refresh_fighter()
+	if _room_session != null:
+		_room_session.set_character(id)
+	if _mode == Mode.PRACTICE:
+		_restart_practice()
+
+
+func _on_arena_chosen(id: String) -> void:
+	_arena_picker.hide()
+	_sound.play("click")
+	if _picker_for == "room":
+		if _room_session != null:
+			_room_session.set_stage(id)
+		return
+	GameSettings.arena = id
+	GameSettings.save()
+	_start_practice()
+
+
+## Hosts (a new code) or joins a room of up to 15. The lobby shows once the server answers.
+func _start_room(code: String, as_host: bool) -> void:
+	_close_session()
+	_close_room()
+	var player_name := GameSettings.player_name if GameSettings.player_name != "" else ("Host" if as_host else "Player")
+	_room_session = RoomSession.new(code, as_host, 10, player_name, GameSettings.character)
+	_room_host = as_host
+	_mode = Mode.ROOM
+	_room = code
+	_share_link = _make_room_link(code)
+	_enter_game()
+
+
+func _close_room() -> void:
+	if _room_session != null:
+		_room_session.close()
+		_room_session = null
+	_room_screen.hide()
+	_chat_layer.hide()
 
 
 ## Hides the menu and shows the arena (and touch controls where wanted).
@@ -392,6 +592,8 @@ func _physics_process(_delta: float) -> void:
 				_practice_step()
 		Mode.ONLINE:
 			_online_step()
+		Mode.ROOM:
+			_room_step()
 	_refresh()
 
 
@@ -427,10 +629,27 @@ func _online_step() -> void:
 	_stalled_ticks = _stalled_ticks + 1 if _session.stalled else 0
 
 
+func _room_step() -> void:
+	if _room_session == null:
+		return
+	var playing := _room_session.phase == RoomSession.Phase.PLAYING
+	_room_session.tick(_local_buttons(0) if playing and not _chat_layer.visible else 0)
+	if _room_session.phase == RoomSession.Phase.ENDED:
+		var code := _room_session.end_code
+		var message := _room_session.end_message
+		if code == "taken" and _room_host and _room_tries < HOST_RETRIES:
+			_room_tries += 1
+			_start_room(_new_room_code(), true) # that code was in use: try another
+			return
+		_go_to_menu(message if code != "left" else "")
+		return
+	_update_touch()
+
+
 ## A person's buttons on this device: P1 is keyboard, first pad and the touch controls. With one
 ## person here (online, or practice against the CPU) P1 gets every pad.
 func _local_buttons(player: int) -> int:
-	var one_person := _mode == Mode.ONLINE or _p2_cpu
+	var one_person := _mode == Mode.ONLINE or _mode == Mode.ROOM or _p2_cpu
 	var b := InputReader.read(player, one_person)
 	if player == 0:
 		b |= _touch.buttons()
@@ -464,10 +683,16 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _smoke != null or _mode == Mode.MENU:
 		return
 	if event.is_action_pressed(InputReader.BACK):
-		if _panel_open():
+		if _circle.visible or _arena_picker.visible:
+			return # the pickers handle their own Back
+		if _chat_layer.visible:
+			_close_chat()
+		elif _panel_open():
 			_close_panel()
 		else:
 			_go_to_menu()
+	elif _mode == Mode.ROOM:
+		return
 	elif _mode == Mode.ONLINE:
 		if event.is_action_pressed(InputReader.RESTART):
 			_on_rematch()
@@ -693,6 +918,7 @@ func _notification(what: int) -> void:
 	match what:
 		NOTIFICATION_WM_CLOSE_REQUEST:
 			_close_session()
+			_close_room()
 		NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_WM_WINDOW_FOCUS_OUT, NOTIFICATION_APPLICATION_PAUSED:
 			# A key held while the window loses focus never sends its release: let go of every key
 			# so the fighter doesn't keep running. (The touch controls do the same for fingers.)
@@ -710,6 +936,8 @@ func _notification(what: int) -> void:
 
 func _exit_tree() -> void:
 	_close_session()
+	if _room_session != null:
+		_room_session.close()
 
 
 # ---- web page address ----
@@ -729,10 +957,33 @@ func _room_from_url() -> String:
 	return ""
 
 
-## The link that opens this page straight into the room: the page's own address (origin + "/" at
-## the site root) with ?room=CODE. "" off the web.
-func _make_share_link(code: String) -> String:
+## The value of ?param=VALUE in the page's address, upper-cased (always "" off the web).
+func _url_param(param: String) -> String:
 	if not OS.has_feature("web"):
+		return ""
+	var search := str(JavaScriptBridge.eval("window.location.search"))
+	for part in search.trim_prefix("?").split("&", false):
+		var pair := part.split("=", true, 1)
+		if pair.size() == 2 and pair[0] == param:
+			return pair[1].uri_decode().strip_edges().to_upper()
+	return ""
+
+
+## The link that opens the web game straight into a room of up to 15: like _make_share_link, with
+## ?arena=CODE.
+func _make_room_link(code: String) -> String:
+	var url := str(RoomSession.url_for_room(code, false, 10, ""))
+	return _make_share_link(code, url.get_slice("?", 0)).replace("?room=", "?arena=")
+
+
+## The link that opens the web game straight into the room: on the web the page's own address
+## (origin + "/" at the site root) with ?room=CODE; elsewhere the relay's host (see below).
+func _make_share_link(code: String, relay_url: String) -> String:
+	if not OS.has_feature("web"):
+		# The Android app: the web game is served from the relay's host, so the link opens the room
+		# in a browser for a friend without the app. None for a local test relay (ws://).
+		if relay_url.begins_with("wss://"):
+			return "https://%s/?room=%s" % [relay_url.trim_prefix("wss://").get_slice("/", 0), code]
 		return ""
 	var origin := str(JavaScriptBridge.eval("window.location.origin"))
 	var path := str(JavaScriptBridge.eval("window.location.pathname"))
@@ -755,6 +1006,21 @@ func _refresh() -> void:
 	_arena.touch_layout = _touch.visible or (_panel_open() and _prefer_touch)
 	_arena.hud_right_inset = MENU_BUTTON + MENU_MARGIN
 	_hud.visible = _mode != Mode.MENU
+	match _mode:
+		Mode.PRACTICE:
+			_arena.fighter_characters = PackedStringArray([GameSettings.character, _cpu_character])
+		Mode.ONLINE:
+			_arena.fighter_characters = PackedStringArray([GameSettings.character, "shahn"]) if _session == null or _session.local_slot != 1 \
+				else PackedStringArray(["shahn", GameSettings.character])
+		Mode.ROOM:
+			_arena.fighter_characters = _room_session.fighter_characters if _room_session != null else PackedStringArray()
+		_:
+			_arena.fighter_characters = PackedStringArray()
+	_arena.room_mode = _mode == Mode.ROOM
+	_arena.shake_enabled = GameSettings.effects
+	_arena.show_hitboxes = GameSettings.show_hitboxes
+	_chat_button.visible = _mode == Mode.ROOM and _room_session != null \
+		and _room_session.phase == RoomSession.Phase.PLAYING and not _panel_open()
 	# Each set once per refresh: hiding a button, even for an instant, cancels a press in progress.
 	_again_button.visible = not _panel_open() and _can_play_again()
 	_copy_button.visible = _mode == Mode.ONLINE and _phase_is("WAITING_FOR_OPPONENT")
@@ -767,17 +1033,40 @@ func _refresh() -> void:
 			_refresh_practice()
 		Mode.ONLINE:
 			_refresh_online()
+		Mode.ROOM:
+			_refresh_room()
+	if not GameSettings.show_debug and _smoke == null:
+		_arena.debug_text = ""
 	# A phone held upright (and not turned by the fullscreen lock): the arena is tiny that way.
 	var view := get_viewport_rect().size
 	if _mode != Mode.MENU and _prefer_touch and view.y > view.x:
 		var hint := _arena.status_small.duplicate()
 		hint.append("Turn your phone sideways for a bigger view")
 		_arena.status_small = hint
+	_update_sound()
 	_place_copy_button()
 	_place_again_button()
 	_refresh_panel()
 	_sync_web_copy()
 	_arena.queue_redraw()
+
+
+## The music and ambience for where we are, and the match's sounds (SoundDirector reads the state).
+func _update_sound() -> void:
+	if _smoke != null:
+		return
+	var in_match := _mode != Mode.MENU and _arena.state != null
+	if _mode == Mode.ROOM and (_room_session == null or _room_session.phase != RoomSession.Phase.PLAYING):
+		in_match = false
+	if not in_match:
+		_sound.set_scene("menu")
+		_sound.observe(null, PackedStringArray(), -1, -1)
+		return
+	var folder := ArenaStages.art_folder(_arena.rules.stage.id)
+	_sound.set_scene(folder if folder != "" else "shahn")
+	var you: int = _arena.you_index if _mode == Mode.ROOM else (0 if _mode == Mode.PRACTICE else (_session.local_slot if _session != null else 0))
+	var frames_left: int = _room_session.frames_left if _mode == Mode.ROOM and _room_session != null else -1
+	_sound.observe(_arena.state, _arena.fighter_characters, you, frames_left)
 
 
 ## A keyboard hint, or "" where the touch controls are in use (the buttons say it there).
@@ -828,6 +1117,8 @@ func _refresh_panel() -> void:
 	_level_button.visible = practice
 	_level_button.text = "CPU: %s" % LEVEL_NAMES[_cpu_level] if _p2_cpu else "P2: person (tap for CPU)"
 	_rematch_button.visible = _mode == Mode.ONLINE and _can_rematch()
+	_end_match_button.visible = _mode == Mode.ROOM and _room_session != null and _room_session.is_host() \
+		and _room_session.phase == RoomSession.Phase.PLAYING
 
 
 func _refresh_practice() -> void:
@@ -849,6 +1140,36 @@ func _refresh_practice() -> void:
 	else:
 		_arena.debug_text = "frame %d   checksum %s   F2 = P2 %s   F3 = CPU level: %s   F4 = Guts %s   F5 / R = restart   Esc = menu" % [
 			_state.frame, checksum, "CPU" if _p2_cpu else "person", LEVEL_NAMES[_cpu_level], "on" if _guts else "off"]
+
+
+func _refresh_room() -> void:
+	var s := _room_session
+	if s == null:
+		return
+	var playing := s.phase == RoomSession.Phase.PLAYING
+	_room_screen.visible = s.phase == RoomSession.Phase.LOBBY and not _panel_open()
+	if _room_screen.visible:
+		_room_screen.show_lobby(s, _share_link)
+	_arena.rules = s.rules if s.rules != null else MatchRules.room(StageDefinition.rooftops(), 10)
+	_arena.state = s.state if playing else null
+	_arena.names = s.fighter_names
+	_arena.you_index = s.my_fighter
+	_arena.time_left_frames = s.frames_left
+	var bubbles: Array = []
+	for c: Dictionary in s.chat_log:
+		var age: int = s.ticks() - int(c["tick"])
+		if age < CHAT_BUBBLE_TICKS and int(c["fighter"]) >= 0:
+			bubbles.append({"fighter": c["fighter"], "text": c["text"], "alpha": clampf(1.0 - float(age - 120) / 60.0, 0.0, 1.0)})
+	_arena.bubbles = bubbles
+	if s.phase == RoomSession.Phase.CONNECTING:
+		_arena.status_big = "Connecting..."
+		_arena.status_small = PackedStringArray(["Room %s" % s.room])
+	elif playing and s.state != null and s.state.match_over:
+		var nick := Nicknames.for_winner(s.state)
+		_arena.over_hint = "%s   Back to the lobby in a moment..." % nick if nick != "" else "Back to the lobby in a moment..."
+	elif playing and s.my_fighter < 0:
+		_arena.status_small = PackedStringArray(["You're watching: you'll play in the next match."])
+	_arena.debug_text = "ROOM %s   %d players   frame %d" % [s.room, s.players.size(), s.state.frame if s.state != null else 0]
 
 
 func _refresh_online() -> void:
@@ -921,6 +1242,7 @@ func _process(_delta: float) -> void:
 
 func _finish_smoke() -> void:
 	var reference_rules := MatchRules.new()
+	reference_rules.weapons = true
 	if reference_rules.fingerprint() != _rules.fingerprint():
 		_end_smoke(false, "the practice rules differ from the defaults the reference run uses")
 		return

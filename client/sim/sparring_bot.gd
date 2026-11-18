@@ -56,6 +56,8 @@ static func think(state: GameState, rules: MatchRules, self_index: int, level: i
 	if me.hit_stop > 0:
 		return Buttons.NONE
 	if me.action == A_ATTACK:
+		if me.move == MoveData.Id.UZI_FIRE and me.uzi_shots < UZI_BURST:
+			return Buttons.LIGHT
 		return _steer_during_move(me, stage, t)
 	if me.action != A_IDLE:
 		return Buttons.NONE
@@ -87,6 +89,21 @@ static func think(state: GameState, rules: MatchRules, self_index: int, level: i
 
 	var b := Buttons.NONE
 	var floor_index := _standing_on(me, rules.stage) if me.grounded else -1
+
+	# Weapons: empty-handed, fetch a box or loose weapon on the same platform; with a gun, the bow,
+	# the bombs or the ball, fire from range once lined up. Melee weapons fight like fists.
+	if rules.weapons and floor_index >= 0:
+		if me.weapon == Weapons.NONE:
+			var item := _nearest_item(state, me, self_index, rules.stage.platforms[floor_index])
+			if item >= 0 and absi(dx) > JAB_RANGE:
+				var to_item := state.props[item].pos_x - me.pos_x
+				return Buttons.RIGHT if to_item > 0 else Buttons.LEFT
+		else:
+			var reach := _ranged_reach(me.weapon)
+			if reach > 0 and absi(dy) < Fx.ONE and absi(dx) <= reach and absi(dx) >= _ranged_min(me.weapon):
+				if me.facing != dir:
+					return toward
+				return Buttons.LIGHT if can_jab and not _hesitates(state.frame, self_index, skill[0]) else Buttons.NONE
 	if floor_index > 0 and dy < -Fx.ONE:
 		# On a floating platform with them below: walk off the end on their side.
 		var p: FxRect = rules.stage.platforms[floor_index]
@@ -136,6 +153,45 @@ static func _attack(me: Fighter, op: Fighter, ground: FxRect, t: FighterTuning, 
 		if op.josh >= FINISHER_JOSH and _picks_heavy(frame, self_index):
 			return Buttons.HEAVY | toward if room else Buttons.HEAVY
 	return Buttons.LIGHT if can_jab else Buttons.NONE
+
+
+## Uzi bullets the bot fires in one held burst.
+const UZI_BURST := 8
+
+
+## How far a shooting weapon is worth firing from (0: a melee weapon, used like fists).
+static func _ranged_reach(w: int) -> int:
+	match w:
+		Weapons.SHOTGUN: return Fx.from_int(4)
+		Weapons.UZI: return Fx.from_int(9)
+		Weapons.BOWLING_BALL: return Fx.from_int(12)
+		Weapons.CHERRY_BOMBS: return Fx.from_int(6)
+		Weapons.BOW: return Fx.from_int(15)
+	return 0
+
+
+## Closer than this, lobbing a bomb would land it behind them (or on the bot).
+static func _ranged_min(w: int) -> int:
+	return Fx.ratio(5, 2) if w == Weapons.CHERRY_BOMBS else 0
+
+
+## The nearest box or loose weapon resting on this platform within 5 m, or -1.
+static func _nearest_item(state: GameState, me: Fighter, self_index: int, floor_rect: FxRect) -> int:
+	var best := -1
+	var best_dist := 0
+	for i in state.props.size():
+		var p := state.props[i]
+		if (p.kind != Weapons.PROP_BOX and p.kind != Weapons.PROP_ITEM) or not p.grounded or p.ignore_fighter == self_index + 1:
+			continue
+		if p.pos_y != floor_rect.max_y or p.pos_x < floor_rect.min_x or p.pos_x > floor_rect.max_x:
+			continue
+		var d := absi(p.pos_x - me.pos_x)
+		if d > Fx.from_int(5):
+			continue
+		if best < 0 or d < best_dist:
+			best = i
+			best_dist = d
+	return best
 
 
 ## Off the stage: steer home, air-jump, then up heavy, then air-dodge up and home, each saved

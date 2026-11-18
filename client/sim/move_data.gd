@@ -3,7 +3,9 @@ extends RefCounted
 ## Frame data for one move (MoveData.cs; numbers documented in docs/design/combat-spec-v0.1.md).
 ## Immutable once built. Fix fields are in Fx units.
 
-enum Id { NONE, JAB, NEUTRAL_HEAVY, SIDE_HEAVY, UP_HEAVY, DOWN_HEAVY, GROUND_SLAM }
+## Weapon attacks (BELAN_BONK on) are shared by every fighter: see Weapons.
+enum Id { NONE, JAB, NEUTRAL_HEAVY, SIDE_HEAVY, UP_HEAVY, DOWN_HEAVY, GROUND_SLAM,
+	BELAN_BONK, BAT_SWING, SHOTGUN_BLAST, BALL_ROLL, UZI_FIRE, BOMB_LOB, BOW_SHOT, WEAPON_THROW }
 
 var startup := 0
 var active := 0

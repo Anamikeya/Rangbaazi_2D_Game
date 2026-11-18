@@ -5,8 +5,11 @@
 ## Commands
 
 - GDScript tests (standard Godot, not .NET): `"$env:LOCALAPPDATA\Programs\Godot-4.7.2-standard\Godot_v4.7.2-stable_win64_console.exe" --headless --path client -s res://tests/run_tests.gd` (exit 0 = pass). Run `--headless --path client --import` first after adding `class_name` scripts.
-- Relay: `dotnet run --project server/Rangbaazi.Relay`; end-to-end netcode check against it: `... --headless --path client -s res://tests/relay_e2e.gd -- --relay ws://127.0.0.1:8080`.
+- Android APK (test build): see `docs/tech/web-client.md`, Android: `--export-release Android ../build/android/rangbaazi.apk` with the debug keystore in `GODOT_ANDROID_KEYSTORE_RELEASE_*`. The phone (Xiaomi) needs the install approved on screen.
+- Relay: `dotnet run --project server/Rangbaazi.Relay`; end-to-end netcode check against it: `... --headless --path client -s res://tests/relay_e2e.gd -- --relay ws://127.0.0.1:8080`, and for rooms of up to 15 (the server runs the match with the C# sim): `... -s res://tests/room_e2e.gd -- --relay ws://127.0.0.1:8080`.
 - Hosting: `tools/deploy-aws.ps1 -Direct` (AWS CLI signed in with `aws login --profile Admin`, then `$env:AWS_PROFILE='Admin'`; region ap-south-1). It creates or changes paid resources: ask before running it. Live link: https://13-203-5-192.sslip.io/ (see docs/tech/web-client.md, Hosting).
+- Art pack into the game: `python tools/gen_arena_stages.py <pack>` (the 31 arena stages, C# and GDScript; then rewrite the goldens) and `python tools/import_art.py <pack>` (fighters and arenas into `client/assets`). The pack is `C:\Users\user\Documents\ChatGPT\Rangbaazi\game-art\round-brawler-v6`.
+- Weapon sprites into the game: `... --headless --path client -s ../tools/cut_weapons.gd -- <game-art folder>` (writes `client/assets/weapons`); weapon sounds come with `python tools/import_audio.py <game-art folder>`. Weapons are specced in `docs/design/combat-spec-v0.3-weapons.md`.
 - Run all tests: `dotnet test Rangbaazi.sln`
 - Build everything, including the Godot project, without the editor: `dotnet build Rangbaazi.sln`
 - In-engine smoke test (builds first; exit code 0 = pass): `powershell -ExecutionPolicy Bypass -File tools/godot.ps1 smoke`. Run it after changing `game/` or the sim.

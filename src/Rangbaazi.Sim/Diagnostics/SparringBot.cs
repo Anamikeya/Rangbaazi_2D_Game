@@ -108,7 +108,8 @@ public static class SparringBot
         FighterTuning t = rules.Tuning;
 
         if (me.HitStop > 0) return Buttons.None; // frozen: nothing it presses would do anything yet
-        if (me.Action == FighterAction.Attack) return SteerDuringMove(in me, stage, t);
+        if (me.Action == FighterAction.Attack)
+            return me.Move == MoveId.UziFire && me.UziShots < UziBurst ? Buttons.Light : SteerDuringMove(in me, stage, t);
         if (me.Action != FighterAction.Idle) return Buttons.None; // dodging, in hitstun, stunned or out
 
         Buttons last = me.PreviousButtons; // jump, attacks and dodge only fire on a fresh press
@@ -136,6 +137,30 @@ public static class SparringBot
 
         Buttons b = Buttons.None;
         int floor = me.Grounded ? StandingOn(in me, rules.Stage) : -1;
+
+        // Weapons: empty-handed, fetch a box or loose weapon on the same platform; with a gun, the
+        // bow, the bombs or the ball, fire from range once lined up. Melee weapons fight like fists.
+        if (rules.Weapons && floor >= 0)
+        {
+            if (me.Weapon == WeaponId.None)
+            {
+                int item = NearestItem(state, in me, self, rules.Stage.Platforms[floor]);
+                if (item >= 0 && Fix.Abs(dx) > JabRange)
+                {
+                    Fix toItem = state.Props[item].Position.X - me.Position.X;
+                    return toItem > Fix.Zero ? Buttons.Right : Buttons.Left;
+                }
+            }
+            else
+            {
+                Fix reach = RangedReach(me.Weapon);
+                if (reach > Fix.Zero && Fix.Abs(dy) < Fix.One && Fix.Abs(dx) <= reach && Fix.Abs(dx) >= RangedMin(me.Weapon))
+                {
+                    if (me.Facing != dir) return toward;
+                    return canJab && !Hesitates(state.Frame, self, skill.AttackOdds) ? Buttons.Light : Buttons.None;
+                }
+            }
+        }
         if (floor > 0 && dy < -Fix.One)
         {
             // On a floating platform with them below. There is no drop-through, so walk off the end
@@ -212,6 +237,45 @@ public static class SparringBot
             if (op.Josh >= FinisherJosh && PicksHeavy(frame, self)) return room ? Buttons.Heavy | toward : Buttons.Heavy;
         }
         return canJab ? Buttons.Light : Buttons.None;
+    }
+
+    /// <summary>Uzi bullets the bot fires in one held burst.</summary>
+    private const int UziBurst = 8;
+
+    /// <summary>How far a shooting weapon is worth firing from (0: a melee weapon, used like fists).</summary>
+    private static Fix RangedReach(WeaponId w) => w switch
+    {
+        WeaponId.Shotgun => Fix.FromInt(4),
+        WeaponId.Uzi => Fix.FromInt(9),
+        WeaponId.BowlingBall => Fix.FromInt(12),
+        WeaponId.CherryBombs => Fix.FromInt(6),
+        WeaponId.Bow => Fix.FromInt(15),
+        _ => Fix.Zero,
+    };
+
+    /// <summary>Closer than this, lobbing a bomb would land it behind them (or on the bot).</summary>
+    private static Fix RangedMin(WeaponId w) => w == WeaponId.CherryBombs ? Fix.FromRatio(5, 2) : Fix.Zero;
+
+    /// <summary>The nearest box or loose weapon resting on this platform within 5 m, or -1.</summary>
+    private static int NearestItem(GameState state, in Fighter me, int self, FixRect floor)
+    {
+        Prop[] props = state.Props;
+        int best = -1;
+        Fix bestDist = Fix.Zero;
+        for (int i = 0; i < props.Length; i++)
+        {
+            ref readonly Prop p = ref props[i];
+            if ((p.Kind != PropKind.Box && p.Kind != PropKind.Item) || !p.Grounded || p.IgnoreFighter == self + 1) continue;
+            if (p.Position.Y != floor.MaxY || p.Position.X < floor.MinX || p.Position.X > floor.MaxX) continue;
+            Fix d = Fix.Abs(p.Position.X - me.Position.X);
+            if (d > Fix.FromInt(5)) continue;
+            if (best < 0 || d < bestDist)
+            {
+                best = i;
+                bestDist = d;
+            }
+        }
+        return best;
     }
 
     /// <summary>

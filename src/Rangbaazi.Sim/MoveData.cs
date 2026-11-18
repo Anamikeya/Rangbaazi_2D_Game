@@ -25,6 +25,18 @@ public enum MoveId : byte
 
     /// <summary>Down + Heavy in the air (GDD B2 "Ground slam"): hovers, then plunges until it lands.</summary>
     GroundSlam,
+
+    // Weapon attacks (Weapons.cs). Shared by every fighter; armed, either attack button fires them.
+    BelanBonk,
+    BatSwing,
+    ShotgunBlast,
+    BallRoll,
+    UziFire,
+    BombLob,
+    BowShot,
+
+    /// <summary>Throwing the held weapon (Drop weapon, or an attack button with it empty). Once.</summary>
+    WeaponThrow,
 }
 
 /// <summary>
@@ -111,7 +123,7 @@ public sealed class MoveSet
         MoveId.UpHeavy => UpHeavy,
         MoveId.DownHeavy => DownHeavy,
         MoveId.GroundSlam => GroundSlam,
-        _ => throw new ArgumentOutOfRangeException(nameof(id), id, "No move data for this id."),
+        _ => Weapons.MoveFor(id) ?? throw new ArgumentOutOfRangeException(nameof(id), id, "No move data for this id."),
     };
 
     /// <summary>

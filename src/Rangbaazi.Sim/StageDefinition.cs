@@ -40,4 +40,10 @@ public static class Stages
         },
         BlastZone = new FixRect(Fix.FromInt(-18), Fix.FromInt(-10), Fix.FromInt(18), Fix.FromInt(14)),
     };
+
+    /// <summary>
+    /// Rookie Rooftops (Shan's arena), the default room arena: see <see cref="ArenaStages"/>, which
+    /// holds all 31 arenas converted from the art pack's layouts.
+    /// </summary>
+    public static StageDefinition Rooftops => ArenaStages.ById("rooftops")!;
 }

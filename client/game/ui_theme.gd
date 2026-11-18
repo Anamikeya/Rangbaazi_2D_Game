@@ -33,7 +33,34 @@ static func build() -> Theme:
 	theme.set_color("caret_color", "LineEdit", ACCENT)
 
 	theme.set_color("font_color", "Label", TEXT)
+
+	# Sliders big enough for a thumb: a thick track, a filled part in the accent colour and a large
+	# round handle.
+	var track := StyleBoxFlat.new()
+	track.bg_color = Color(1, 1, 1, 0.18)
+	track.set_corner_radius_all(10)
+	track.content_margin_top = 10
+	track.content_margin_bottom = 10
+	var filled := track.duplicate() as StyleBoxFlat
+	filled.bg_color = ACCENT
+	theme.set_stylebox("slider", "HSlider", track)
+	theme.set_stylebox("grabber_area", "HSlider", filled)
+	theme.set_stylebox("grabber_area_highlight", "HSlider", filled)
+	theme.set_icon("grabber", "HSlider", _disc(44, Color.WHITE))
+	theme.set_icon("grabber_highlight", "HSlider", _disc(48, ACCENT.lightened(0.4)))
 	return theme
+
+
+## A round handle for sliders, drawn here (no image files).
+static func _disc(diameter: int, color: Color) -> Texture2D:
+	var image := Image.create(diameter, diameter, false, Image.FORMAT_RGBA8)
+	var r := diameter / 2.0
+	for y in diameter:
+		for x in diameter:
+			var d := Vector2(x + 0.5 - r, y + 0.5 - r).length()
+			if d <= r:
+				image.set_pixel(x, y, Color(color, clampf(r - d, 0.0, 1.0)) if d > r - 3.0 else color.darkened(0.08 if d > r - 6.0 else 0.0))
+	return ImageTexture.create_from_image(image)
 
 
 ## The box behind a panel of buttons (the in-match menu): roomier than a button's.

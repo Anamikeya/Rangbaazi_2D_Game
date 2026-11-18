@@ -26,6 +26,52 @@ public sealed class MatchRules
     /// <summary>Hit-stop range (GDD B2 feel targets: 4-10 frames, scaled by damage).</summary>
     public int MinHitStop { get; init; } = 4;
     public int MaxHitStop { get; init; } = 10;
+
+    /// <summary>
+    /// Timed free-for-all (online rooms) when above 0: nobody is ever eliminated, a fighter who
+    /// leaves the blast zone always respawns, KOs score, and the match ends after this many frames.
+    /// 0 is a stock match.
+    /// </summary>
+    public int TimeLimitFrames { get; init; }
+
+    /// <summary>A ring-out within this many frames of a fighter's last hit credits that attacker with the KO.</summary>
+    public int KoCreditFrames { get; init; } = 300; // 5 s
+
+    /// <summary>
+    /// Comeback "rage": a fighter's hits do up to this many percent more damage and knockback, scaling
+    /// with its own Josh up to <see cref="RageJosh"/>. 0 is off.
+    /// </summary>
+    public int RagePercent { get; init; }
+    public int RageJosh { get; init; } = 150;
+
+    /// <summary>
+    /// Hidden second wind: after a respawn, this much incoming damage is absorbed before Josh rises.
+    /// Never shown to players. 0 is off.
+    /// </summary>
+    public int RespawnShield { get; init; }
+
+    /// <summary>Prop Boxes drop weapons (Weapons.cs). Off, the match is fists only.</summary>
+    public bool Weapons { get; init; }
+
+    /// <summary>
+    /// Each fighter's own weapon, by fighter index (<see cref="Sim.Weapons.SignatureFor"/>): with it,
+    /// their hits do <see cref="Sim.Weapons.SignaturePercent"/>. Null or shorter: no signature.
+    /// </summary>
+    public WeaponId[]? Signatures { get; init; }
+
+    public WeaponId SignatureOf(int fighter) =>
+        Signatures != null && fighter >= 0 && fighter < Signatures.Length ? Signatures[fighter] : WeaponId.None;
+
+    /// <summary>A room match: the timed free-for-all with weapons, rage and the hidden second wind.</summary>
+    public static MatchRules Room(StageDefinition stage, int minutes, WeaponId[]? signatures = null) => new()
+    {
+        Stage = stage,
+        TimeLimitFrames = minutes * 60 * Simulation.TicksPerSecond,
+        RagePercent = 50,
+        RespawnShield = 20,
+        Weapons = true,
+        Signatures = signatures,
+    };
 }
 
 /// <summary>
@@ -34,16 +80,19 @@ public sealed class MatchRules
 /// ground slam, dodge and parry, hit-stop, Josh % knockback, Guts, and ring-out
 /// (docs/design/combat-spec-v0.1.md). Light strings, grabs, weapons and Taali come next.
 /// </summary>
-public static class Simulation
+public static partial class Simulation
 {
     public const int TicksPerSecond = 60;
+
+    /// <summary>Most fighters in one match: online rooms hold up to 15 players (one spare slot).</summary>
+    public const int MaxFighters = 16;
 
     private static readonly Fix Diagonal = Fix.FromRatio(7071, 10000); // ~sin(45deg)
 
     public static GameState CreateInitialState(MatchRules rules, int fighterCount, ulong seed)
     {
-        if (fighterCount < 1 || fighterCount > 8)
-            throw new ArgumentOutOfRangeException(nameof(fighterCount), "1-8 fighters (GDD B3).");
+        if (fighterCount < 1 || fighterCount > MaxFighters)
+            throw new ArgumentOutOfRangeException(nameof(fighterCount), $"1-{MaxFighters} fighters.");
 
         var state = new GameState(fighterCount, seed);
         for (int i = 0; i < fighterCount; i++)
@@ -52,6 +101,7 @@ public static class Simulation
             f.Stocks = rules.Stocks;
             Spawn(ref f, i, rules);
         }
+        state.PropTimer = Weapons.FirstBoxFrames;
         return state;
     }
 
@@ -65,13 +115,16 @@ public static class Simulation
             Fighter[] fighters = state.Fighters;
             Span<bool> frozen = stackalloc bool[fighters.Length];
             for (int i = 0; i < fighters.Length; i++) frozen[i] = UpdateFighter(ref fighters[i], i, inputs[i], rules);
+            if (rules.Weapons) FireShots(state, frozen, rules);
             ResolveHits(fighters, frozen, rules);
+            if (rules.Weapons) UpdateProps(state, frozen, rules);
             for (int i = 0; i < fighters.Length; i++)
             {
                 EndPlungeOnLanding(ref fighters[i], rules.Tuning);
-                CheckBlastZone(ref fighters[i], rules);
+                if (rules.Weapons) ReturnOnFall(state, i, rules);
+                CheckBlastZone(fighters, i, rules);
             }
-            CheckMatchOver(state);
+            CheckMatchOver(state, rules);
         }
 
         state.Frame++;
@@ -125,7 +178,11 @@ public static class Simulation
         if (f.Action == FighterAction.Eliminated || f.Action == FighterAction.Respawning)
         {
             f.PreviousButtons = input;
-            if (f.Action == FighterAction.Respawning && ++f.ActionFrame >= rules.RespawnFrames) Spawn(ref f, index, rules);
+            if (f.Action == FighterAction.Respawning && ++f.ActionFrame >= rules.RespawnFrames)
+            {
+                Spawn(ref f, index, rules);
+                f.Shield = rules.RespawnShield; // the hidden second wind, only after a respawn
+            }
             return false;
         }
 
@@ -185,6 +242,7 @@ public static class Simulation
     {
         if (f.DodgeCooldown > 0) f.DodgeCooldown--;
         if (f.ArmorFrames > 0) f.ArmorFrames--;
+        if (f.LastHitTimer > 0) f.LastHitTimer--;
         if (f.GutsTimer > 0 && --f.GutsTimer == 0)
         {
             f.Josh = Math32.Max(0, f.Josh - rules.GutsHeal);
@@ -204,6 +262,7 @@ public static class Simulation
         if (dir != 0) f.Facing = dir;
 
         Fix targetVx = dir * (f.Grounded ? t.RunSpeed : t.AirSpeed);
+        if (f.Weapon == WeaponId.BowlingBall) targetVx = targetVx * 4 / 5; // the ball is heavy
         f.Velocity.X = Fix.MoveToward(f.Velocity.X, targetVx, f.Grounded ? t.GroundAccel : t.AirAccel);
 
         if ((pressed & Buttons.Dodge) != 0 && f.DodgeCooldown == 0 && (f.Grounded || !f.AirDodgeUsed))
@@ -213,8 +272,12 @@ public static class Simulation
         }
 
         MoveId move = MoveId.None;
-        if ((pressed & Buttons.Heavy) != 0) move = HeavyFor(in f, input, dir);
-        if (move == MoveId.None && (pressed & Buttons.Light) != 0) move = MoveId.Jab;
+        if (f.Weapon != WeaponId.None) move = ArmedMove(in f, input, pressed);
+        else
+        {
+            if ((pressed & Buttons.Heavy) != 0) move = HeavyFor(in f, input, dir);
+            if (move == MoveId.None && (pressed & Buttons.Light) != 0) move = MoveId.Jab;
+        }
         if (move == MoveId.None)
         {
             if ((pressed & Buttons.Jump) != 0) Jump(ref f, t);
@@ -225,7 +288,20 @@ public static class Simulation
         f.Move = move;
         f.ActionFrame = 0;
         f.AttackConnected = false;
+        f.UziShots = 0;
         return AttackMotion(ref f, input, t, steer: false);
+    }
+
+    /// <summary>
+    /// Armed, the attack buttons are one button: Light, Heavy or both fire the weapon's attack once,
+    /// or throw it when it's empty. Drop weapon throws it. Up + Heavy stays the recovery.
+    /// </summary>
+    private static MoveId ArmedMove(in Fighter f, Buttons input, Buttons pressed)
+    {
+        if ((pressed & Buttons.Heavy) != 0 && (input & Buttons.Up) != 0) return f.RecoveryUsed ? MoveId.None : MoveId.UpHeavy;
+        if ((pressed & Buttons.DropWeapon) != 0) return MoveId.WeaponThrow;
+        if ((pressed & (Buttons.Light | Buttons.Heavy)) == 0) return MoveId.None;
+        return f.WeaponSupply > 0 ? Weapons.Get(f.Weapon).Move : MoveId.WeaponThrow;
     }
 
     private static void Jump(ref Fighter f, FighterTuning t)
@@ -257,6 +333,10 @@ public static class Simulation
     {
         MoveData m = t.Moves[f.Move];
         f.ActionFrame++;
+        // The Uzi keeps firing while an attack button is held (and it has rounds).
+        if (f.Move == MoveId.UziFire && f.ActionFrame == m.Startup + Weapons.UziInterval
+            && (input & (Buttons.Light | Buttons.Heavy)) != 0 && f.WeaponSupply > 0)
+            f.ActionFrame = m.Startup;
         if (f.ActionFrame >= m.TotalFrames)
         {
             f.Action = FighterAction.Idle;
@@ -279,7 +359,9 @@ public static class Simulation
             // Attacks lock steering: friction on the ground, drift kept in the air. Exceptions: a
             // move with air control steers, and a lunge brakes in the air too (more slowly than on
             // the ground), or an airborne side heavy would carry the fighter several metres.
-            if (f.Grounded) f.Velocity.X = Fix.MoveToward(f.Velocity.X, Fix.Zero, t.GroundAccel);
+            if (f.Grounded && f.Move == MoveId.UziFire) // walk at half speed while firing, without turning
+                f.Velocity.X = Fix.MoveToward(f.Velocity.X, Horizontal(input) * t.RunSpeed / 2, t.GroundAccel);
+            else if (f.Grounded) f.Velocity.X = Fix.MoveToward(f.Velocity.X, Fix.Zero, t.GroundAccel);
             else if (m.AirControl) f.Velocity.X = Fix.MoveToward(f.Velocity.X, Horizontal(input) * t.AirSpeed, t.AirAccel);
             else if (m.LungeSpeed != Fix.Zero && f.ActionFrame > m.ImpulseFrame)
                 f.Velocity.X = Fix.MoveToward(f.Velocity.X, Fix.Zero, t.AirAccel);
@@ -454,8 +536,15 @@ public static class Simulation
         for (int i = 0; i < contacts; i++)
             if (contactParried[i]) ApplyParry(ref fighters[contactAttacker[i]], ref fighters[contactTarget[i]], rules);
         for (int i = 0; i < contacts; i++)
-            if (!contactParried[i]) ApplyHit(ref fighters[contactAttacker[i]], ref fighters[contactTarget[i]], t.Moves[(MoveId)contactMove[i]], rules);
+            if (!contactParried[i]) ApplyHit(fighters, contactAttacker[i], contactTarget[i], (MoveId)contactMove[i], rules);
     }
+
+    /// <summary>
+    /// The rage multiplier, in percent, for hits by a fighter at <paramref name="josh"/>:
+    /// 100 + RagePercent × min(josh, RageJosh) / RageJosh.
+    /// </summary>
+    public static int RageMultiplier(int josh, MatchRules rules) =>
+        rules.RagePercent <= 0 ? 100 : 100 + Math32.Min(josh, rules.RageJosh) * rules.RagePercent / rules.RageJosh;
 
     /// <summary>
     /// The attacker is stunned in place: it stops moving sideways and stops rising, so a parried
@@ -473,7 +562,12 @@ public static class Simulation
         atk.HitstunFrames = rules.Tuning.ParryStunFrames;
         atk.Velocity = new FixVec2(Fix.Zero, Fix.Min(atk.Velocity.Y, Fix.Zero));
         atk.HitStop = Math32.Max(atk.HitStop, rules.MaxHitStop);
+        ParryReward(ref def, rules);
+    }
 
+    /// <summary>The parrying defender's reward, for a fighter's attack or a projectile.</summary>
+    private static void ParryReward(ref Fighter def, MatchRules rules)
+    {
         if (def.Action == FighterAction.Dodge) // only once, if it parries two attackers on one frame
         {
             def.Action = FighterAction.Idle;
@@ -484,15 +578,129 @@ public static class Simulation
         def.HitStop = Math32.Max(def.HitStop, rules.MaxHitStop);
     }
 
-    private static void ApplyHit(ref Fighter atk, ref Fighter def, MoveData m, MatchRules rules)
+    /// <summary>A hit about to land: a move's numbers after weapon bonuses.</summary>
+    private struct Hit
     {
-        atk.AttackConnected = true;
+        public int Damage;
+        public int Percent;          // damage multiplier: the signature bonus and sweet spots
+        public Fix BaseKnockback;
+        public Fix KnockbackGrowth;
+        public Fix LaunchX;
+        public Fix LaunchY;
+        public int HitstunBonus;
+        public bool NoHitStop;       // Uzi bullets: the target doesn't freeze
+        public bool MaxHitStop;      // sweet spots always freeze the longest
 
-        def.Josh = Math32.Min(rules.MaxJosh, def.Josh + m.Damage);
-        int stop = HitStopFrames(m.Damage, rules);
-        atk.HitStop = Math32.Max(atk.HitStop, stop);
-        def.HitStop = Math32.Max(def.HitStop, stop);
-        def.FrozenByHit = true;
+        public Hit(MoveData m)
+        {
+            Damage = m.Damage;
+            Percent = 100;
+            BaseKnockback = m.BaseKnockback;
+            KnockbackGrowth = m.KnockbackGrowth;
+            LaunchX = m.LaunchX;
+            LaunchY = m.LaunchY;
+            HitstunBonus = m.HitstunBonus;
+            NoHitStop = false;
+            MaxHitStop = false;
+        }
+
+        /// <summary>A sweet-spot hit: 1.25x damage and base knockback, the longest hit-stop.</summary>
+        public void Sweeten()
+        {
+            Percent = Percent * Weapons.SweetPercent / 100;
+            BaseKnockback = BaseKnockback * Weapons.SweetPercent / 100;
+            MaxHitStop = true;
+        }
+    }
+
+    /// <summary>A fighter's move connects: fists, or a melee weapon (belan, bat, shotgun).</summary>
+    private static void ApplyHit(Fighter[] fighters, int attacker, int target, MoveId move, MatchRules rules)
+    {
+        ref Fighter atk = ref fighters[attacker];
+        ref Fighter def = ref fighters[target];
+        atk.AttackConnected = true;
+        MoveData m = rules.Tuning.Moves[move];
+        var hit = new Hit(m);
+
+        // Launch away from the attacker. For moves whose hitbox reaches behind the attacker (the
+        // up heavy, the slam, the sweep) that depends on which side the target is on.
+        int side = atk.Facing;
+        bool reachesBehind = m.HitsBothSides || m.HitboxNear < Fix.Zero;
+        if (reachesBehind && def.Position.X != atk.Position.X) side = def.Position.X > atk.Position.X ? 1 : -1;
+
+        WeaponId weapon = WeaponId.None;
+        if (move == MoveId.BelanBonk || move == MoveId.BatSwing || move == MoveId.ShotgunBlast)
+        {
+            weapon = atk.Weapon;
+            MeleeWeaponHit(ref atk, in def, move, ref hit, rules);
+        }
+        if (weapon != WeaponId.None && rules.SignatureOf(attacker) == weapon) hit.Percent = hit.Percent * Weapons.SignaturePercent / 100;
+        LandHit(fighters, attacker, target, in hit, side, freezeAttacker: true, rules);
+    }
+
+    /// <summary>
+    /// A melee weapon's sweet spot and quirks. Belan: bonking someone in the middle of their own
+    /// attack dizzies them longer. Bat: the very tip (1.3 m or more away) launches flat, the "six".
+    /// Shotgun: point blank (within 1.2 m) is the sweet spot; beyond 3 m it does only 10. Belan and
+    /// bat lose a hit of durability.
+    /// </summary>
+    private static void MeleeWeaponHit(ref Fighter atk, in Fighter def, MoveId move, ref Hit hit, MatchRules rules)
+    {
+        FixRect hurt = Hurtbox(in def, rules.Tuning);
+        Fix near = atk.Facing > 0 ? hurt.MinX - atk.Position.X : atk.Position.X - hurt.MaxX;
+        if (move == MoveId.BelanBonk)
+        {
+            if (atk.WeaponSupply > 0) atk.WeaponSupply--;
+            if (def.Action == FighterAction.Attack)
+            {
+                hit.Sweeten();
+                hit.HitstunBonus += 6;
+            }
+        }
+        else if (move == MoveId.BatSwing)
+        {
+            if (atk.WeaponSupply > 0) atk.WeaponSupply--;
+            if (near >= Weapons.BatTip)
+            {
+                hit.Sweeten();
+                hit.LaunchX = Weapons.SixLaunchX;
+                hit.LaunchY = Weapons.SixLaunchY;
+            }
+        }
+        else
+        {
+            if (near > Weapons.ShotgunFar) hit.Damage = Weapons.ShotgunFarDamage;
+            else if (near <= Weapons.PointBlank) hit.Sweeten();
+        }
+    }
+
+    /// <summary>
+    /// Applies a hit: rage, the hidden second wind, Josh, hit-stop, Guts, then knockback in
+    /// direction <paramref name="side"/>. Projectiles don't freeze their owner.
+    /// </summary>
+    private static void LandHit(Fighter[] fighters, int attacker, int target, in Hit hit, int side, bool freezeAttacker, MatchRules rules)
+    {
+        ref Fighter atk = ref fighters[attacker];
+        ref Fighter def = ref fighters[target];
+
+        // Rage: the attacker's own Josh makes its hits stronger (a comeback when close to death).
+        int rage = RageMultiplier(atk.Josh, rules);
+        int damage = hit.Damage * rage / 100;
+        if (hit.Percent != 100) damage = damage * hit.Percent / 100;
+
+        // The hidden second wind soaks damage first.
+        int absorbed = Math32.Min(def.Shield, damage);
+        def.Shield -= absorbed;
+        def.Josh = Math32.Min(rules.MaxJosh, def.Josh + damage - absorbed);
+        def.LastHitBy = attacker + 1;
+        def.LastHitTimer = rules.KoCreditFrames;
+        if (!hit.NoHitStop)
+        {
+            int stop = hit.MaxHitStop ? rules.MaxHitStop : HitStopFrames(damage, rules);
+            if (freezeAttacker) atk.HitStop = Math32.Max(atk.HitStop, stop);
+            def.HitStop = Math32.Max(def.HitStop, stop);
+            def.FrozenByHit = true;
+        }
 
         if (rules.Guts && !def.GutsUsed && def.Josh >= rules.GutsJosh)
         {
@@ -505,28 +713,31 @@ public static class Simulation
         // A dodge cut short by a hit still costs its cooldown (the dodge would have set it on ending).
         if (def.Action == FighterAction.Dodge) def.DodgeCooldown = rules.Tuning.DodgeCooldownFrames;
 
-        // Launch away from the attacker. For moves whose hitbox reaches behind the attacker (the
-        // up heavy, the slam, the sweep) that depends on which side the target is on.
-        Fix kb = m.BaseKnockback + m.KnockbackGrowth * def.Josh;
-        int side = atk.Facing;
-        bool reachesBehind = m.HitsBothSides || m.HitboxNear < Fix.Zero;
-        if (reachesBehind && def.Position.X != atk.Position.X) side = def.Position.X > atk.Position.X ? 1 : -1;
-
-        def.Velocity = new FixVec2(kb * m.LaunchX * side, kb * m.LaunchY);
+        Fix kb = hit.BaseKnockback + hit.KnockbackGrowth * def.Josh;
+        if (rage != 100) kb = kb * rage / 100;
+        def.Velocity = new FixVec2(kb * hit.LaunchX * side, kb * hit.LaunchY);
         def.Grounded = false;
         def.Action = FighterAction.Hitstun;
         def.Move = MoveId.None;
         def.ActionFrame = 0;
-        def.HitstunFrames = 8 + def.Josh / 8 + m.HitstunBonus;
+        def.HitstunFrames = Math32.Max(1, 8 + def.Josh / 8 + hit.HitstunBonus);
         def.AirDodgeUsed = false; // getting hit gives back the air dodge and the recovery
         def.RecoveryUsed = false;
     }
 
-    private static void CheckBlastZone(ref Fighter f, MatchRules rules)
+    private static void CheckBlastZone(Fighter[] fighters, int index, MatchRules rules)
     {
+        ref Fighter f = ref fighters[index];
         if (!f.IsActive || rules.Stage.BlastZone.Contains(f.Position)) return;
 
-        f.Stocks--;
+        // The KO goes to whoever hit this fighter last, if that was recent; a lone fall scores none.
+        f.Falls++;
+        if (f.LastHitTimer > 0 && f.LastHitBy > 0 && f.LastHitBy - 1 != index) fighters[f.LastHitBy - 1].Kos++;
+        f.LastHitBy = 0;
+        f.LastHitTimer = 0;
+
+        bool timed = rules.TimeLimitFrames > 0;
+        if (!timed) f.Stocks--;
         f.Velocity = FixVec2.Zero;
         f.Josh = 0;
         f.ActionFrame = 0;
@@ -535,11 +746,20 @@ public static class Simulation
         f.FrozenByHit = false;
         f.GutsTimer = 0; // losing the stock cancels a pending Guts
         f.ArmorFrames = 0;
-        f.Action = f.Stocks > 0 ? FighterAction.Respawning : FighterAction.Eliminated;
+        f.Shield = 0;
+        f.Action = timed || f.Stocks > 0 ? FighterAction.Respawning : FighterAction.Eliminated;
     }
 
-    private static void CheckMatchOver(GameState state)
+    private static void CheckMatchOver(GameState state, MatchRules rules)
     {
+        if (rules.TimeLimitFrames > 0)
+        {
+            if (state.Frame + 1 < rules.TimeLimitFrames) return;
+            state.MatchOver = true;
+            state.WinnerIndex = TimedWinner(state.Fighters);
+            return;
+        }
+
         if (state.Fighters.Length < 2) return;
 
         int alive = 0, last = -1;
@@ -555,6 +775,31 @@ public static class Simulation
             state.MatchOver = true;
             state.WinnerIndex = alive == 1 ? last : -1;
         }
+    }
+
+    /// <summary>
+    /// The timed match's winner: most KOs, then fewest falls. -1 if the best two are level on both.
+    /// </summary>
+    public static int TimedWinner(Fighter[] fighters)
+    {
+        int best = -1;
+        bool tied = false;
+        for (int i = 0; i < fighters.Length; i++)
+        {
+            if (best < 0) { best = i; continue; }
+            ref Fighter f = ref fighters[i];
+            ref Fighter b = ref fighters[best];
+            if (f.Kos > b.Kos || (f.Kos == b.Kos && f.Falls < b.Falls))
+            {
+                best = i;
+                tied = false;
+            }
+            else if (f.Kos == b.Kos && f.Falls == b.Falls)
+            {
+                tied = true;
+            }
+        }
+        return tied ? -1 : best;
     }
 
     private static void Spawn(ref Fighter f, int index, MatchRules rules)
@@ -579,6 +824,14 @@ public static class Simulation
         f.GutsUsed = false; // a new stock gets a new Guts
         f.GutsTimer = 0;
         f.ArmorFrames = 0;
+        f.Shield = 0;
+        f.LastHitBy = 0;
+        f.LastHitTimer = 0;
+        f.Weapon = WeaponId.None;
+        f.WeaponSupply = 0;
+        f.UziShots = 0;
+        f.UziStreak = 0;
+        f.UziTarget = 0;
     }
 }
 

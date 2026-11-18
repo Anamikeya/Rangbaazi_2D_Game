@@ -3,9 +3,9 @@ class_name InputReader
 ## actions are registered in code instead of project.godot, so every binding lives here and
 ## remapping can be added in one place later.
 ##
-##   P1 keyboard: A / D move, W up, S down, Space jump, J light, K heavy, L dodge
-##   P2 keyboard: arrows move and aim, Numpad 0 jump, 1 light, 2 heavy, 3 dodge
-##   Gamepads: left stick or d-pad, A jump, X light, Y heavy, RB dodge. P1 has the first
+##   P1 keyboard: A / D move, W up, S down, Space jump, J light, K heavy, L dodge, U throw weapon
+##   P2 keyboard: arrows move and aim, Numpad 0 jump, 1 light, 2 heavy, 3 dodge, 4 throw weapon
+##   Gamepads: left stick or d-pad, A jump, X light, Y heavy, RB dodge, LB throw weapon. P1 has the first
 ##     connected pad and P2 the second; with one person on this device (online, or practice
 ##     against the CPU) P1 has every pad, so a pad still works when the OS lists a non-pad
 ##     device first (some Android phones report their fingerprint sensor as a joypad).
@@ -26,20 +26,20 @@ const BACK := &"rb_back"
 ## Sim buttons and their action-name suffixes. KEYS and PAD_BUTTONS use the same order.
 const BUTTONS := [
 	Buttons.LEFT, Buttons.RIGHT, Buttons.UP, Buttons.DOWN,
-	Buttons.JUMP, Buttons.LIGHT, Buttons.HEAVY, Buttons.DODGE,
+	Buttons.JUMP, Buttons.LIGHT, Buttons.HEAVY, Buttons.DODGE, Buttons.DROP_WEAPON,
 ]
-const SUFFIXES := ["left", "right", "up", "down", "jump", "light", "heavy", "dodge"]
+const SUFFIXES := ["left", "right", "up", "down", "jump", "light", "heavy", "dodge", "throw"]
 
 ## Default physical keys (layout-independent) for P1 and P2, in BUTTONS order.
 const KEYS := [
-	[KEY_A, KEY_D, KEY_W, KEY_S, KEY_SPACE, KEY_J, KEY_K, KEY_L],
-	[KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_KP_0, KEY_KP_1, KEY_KP_2, KEY_KP_3],
+	[KEY_A, KEY_D, KEY_W, KEY_S, KEY_SPACE, KEY_J, KEY_K, KEY_L, KEY_U],
+	[KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_KP_0, KEY_KP_1, KEY_KP_2, KEY_KP_3, KEY_KP_4],
 ]
 
 ## Pad buttons in BUTTONS order (the d-pad for the four directions).
 const PAD_BUTTONS := [
 	JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_DPAD_RIGHT, JOY_BUTTON_DPAD_UP, JOY_BUTTON_DPAD_DOWN,
-	JOY_BUTTON_A, JOY_BUTTON_X, JOY_BUTTON_Y, JOY_BUTTON_RIGHT_SHOULDER,
+	JOY_BUTTON_A, JOY_BUTTON_X, JOY_BUTTON_Y, JOY_BUTTON_RIGHT_SHOULDER, JOY_BUTTON_LEFT_SHOULDER,
 ]
 
 ## Stick past this counts as held (same dead zone as the C# bindings).

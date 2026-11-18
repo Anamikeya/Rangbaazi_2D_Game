@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8765", "--bind", "127.0.0.1", "--directory", "build/web"],
       "port": 8765
+    },
+    {
+      "name": "relay",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "server/Rangbaazi.Relay", "--", "--urls", "http://127.0.0.1:8080"],
+      "port": 8080
     }
   ]
 }

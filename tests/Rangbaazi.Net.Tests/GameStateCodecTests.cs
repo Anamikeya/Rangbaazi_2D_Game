@@ -66,6 +66,8 @@ public class GameStateCodecTests
                 Type t when t == typeof(bool) => !(bool)field.GetValue(state)!,
                 Type t when t == typeof(SimRandom) => new SimRandom(0xDEADBEEF),
                 Type t when t == typeof(Fighter[]) => ChangedFighters(state),
+                Type t when t == typeof(Prop[]) => ChangedProps(state),
+                Type t when t == typeof(WeaponId) => WeaponId.Bow,
                 _ => throw new InvalidOperationException($"GameState.{field.Name} ({field.FieldType.Name}) has no case in this test; add it here and to GameStateCodec."),
             };
             field.SetValue(state, changed);
@@ -73,8 +75,17 @@ public class GameStateCodecTests
             Assert.Equal(state.Checksum(), loaded.Checksum());
             object? expected = field.GetValue(state), actual = field.GetValue(loaded);
             if (expected is Fighter[] a) Assert.Equal(a, (Fighter[])actual!);
+            else if (expected is Prop[] p) Assert.Equal(p, (Prop[])actual!);
             else Assert.Equal(expected, actual);
         }
+    }
+
+    private static Prop[] ChangedProps(GameState state)
+    {
+        var props = (Prop[])state.Props.Clone();
+        props[5] = new Prop { Kind = PropKind.Shot, Shot = ShotKind.Arrow, Weapon = WeaponId.Bow, Owner = 1, Age = 9, HitMask = 3,
+            Position = new FixVec2(Fix.FromInt(2), Fix.One) };
+        return props;
     }
 
     private static Fighter[] ChangedFighters(GameState state)

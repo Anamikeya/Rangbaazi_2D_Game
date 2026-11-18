@@ -14,6 +14,13 @@ public sealed class GameState
     public bool MatchOver;
     public int WinnerIndex = -1;
 
+    /// <summary>Prop Boxes, loose weapons and projectiles (Weapons.cs): a fixed array, cheap to copy.</summary>
+    public Prop[] Props = new Prop[Weapons.MaxProps];
+
+    /// <summary>Frames until the next Prop Box drops, and the weapon the last one held.</summary>
+    public int PropTimer;
+    public WeaponId LastBoxWeapon;
+
     public GameState(int fighterCount, ulong seed)
     {
         Fighters = new Fighter[fighterCount];
@@ -36,6 +43,9 @@ public sealed class GameState
         Array.Copy(other.Fighters, Fighters, Fighters.Length);
         MatchOver = other.MatchOver;
         WinnerIndex = other.WinnerIndex;
+        Array.Copy(other.Props, Props, Props.Length);
+        PropTimer = other.PropTimer;
+        LastBoxWeapon = other.LastBoxWeapon;
     }
 
     /// <summary>Stable checksum used for desync detection between peers.</summary>
@@ -47,6 +57,9 @@ public sealed class GameState
         h.Add(MatchOver);
         h.Add(WinnerIndex);
         for (int i = 0; i < Fighters.Length; i++) Fighters[i].AddTo(ref h);
+        h.Add(PropTimer);
+        h.Add((int)LastBoxWeapon);
+        for (int i = 0; i < Props.Length; i++) Props[i].AddTo(ref h);
         return h.Value;
     }
 }

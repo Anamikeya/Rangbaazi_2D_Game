@@ -11,7 +11,8 @@ namespace Rangbaazi.Net;
 /// Turns a <see cref="GameState"/> into the bytes Backdash keeps for rollback, and back.
 ///
 /// Layout: our FNV-1a <see cref="GameState.Checksum"/> (8 bytes), Frame, Random.State, MatchOver,
-/// WinnerIndex, the fighter count, then the <see cref="Fighter"/> array as raw memory.
+/// WinnerIndex, the fighter count, the <see cref="Fighter"/> array as raw memory, then PropTimer,
+/// LastBoxWeapon and the <see cref="Prop"/> array as raw memory.
 /// The bytes never leave this machine (only the folded checksum is compared with the other
 /// peer), so the raw struct copy is safe, and a new <see cref="Fighter"/> field is saved without
 /// touching this file. A new <see cref="GameState"/> field must be added here, as well as to
@@ -23,7 +24,10 @@ public static class GameStateCodec
     /// <summary>Bytes before the fighter array.</summary>
     private const int HeaderSize = 8 + 4 + 8 + 1 + 4 + 4;
 
-    public static int SizeFor(int fighters) => HeaderSize + fighters * Unsafe.SizeOf<Fighter>();
+    /// <summary>Bytes after the fighter array: the prop timer, the last box's weapon and the props.</summary>
+    private static int PropsSize => 4 + 4 + Weapons.MaxProps * Unsafe.SizeOf<Prop>();
+
+    public static int SizeFor(int fighters) => HeaderSize + fighters * Unsafe.SizeOf<Fighter>() + PropsSize;
 
     /// <summary>Writes the state and returns its checksum.</summary>
     public static ulong Write(GameState state, in BinaryBufferWriter writer)
@@ -36,6 +40,9 @@ public static class GameStateCodec
         writer.Write(state.WinnerIndex);
         writer.Write(state.Fighters.Length);
         writer.WriteStruct<Fighter>(state.Fighters);
+        writer.Write(state.PropTimer);
+        writer.Write((int)state.LastBoxWeapon);
+        writer.WriteStruct<Prop>(state.Props);
         return checksum;
     }
 
@@ -53,10 +60,13 @@ public static class GameStateCodec
         int fighters = reader.ReadInt32();
 
         // ReadStruct copies whatever is left without complaint, so check the size first.
-        if (fighters != state.Fighters.Length || reader.FreeCapacity != fighters * Unsafe.SizeOf<Fighter>())
+        if (fighters != state.Fighters.Length || reader.FreeCapacity != fighters * Unsafe.SizeOf<Fighter>() + PropsSize)
             throw new InvalidDataException(
                 $"Saved state has {fighters} fighters and {reader.FreeCapacity} bytes left; expected {state.Fighters.Length}.");
         reader.ReadStruct<Fighter>(state.Fighters);
+        state.PropTimer = reader.ReadInt32();
+        state.LastBoxWeapon = (WeaponId)reader.ReadInt32();
+        reader.ReadStruct<Prop>(state.Props);
 
         if (state.Checksum() != saved)
             throw new InvalidDataException($"Loaded state for frame {state.Frame} doesn't match its saved checksum.");

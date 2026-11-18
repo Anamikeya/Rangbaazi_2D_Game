@@ -29,6 +29,16 @@ var recovery_used := false
 var guts_used := false
 var guts_timer := 0
 var armor_frames := 0
+var kos := 0             # ring-outs credited to this fighter (the timed match's score)
+var falls := 0           # times this fighter has left the blast zone
+var last_hit_by := 0     # 1 + index of the fighter who hit this one last, or 0
+var last_hit_timer := 0  # frames left in which a ring-out still credits last_hit_by
+var shield := 0          # hidden second wind: damage absorbed before Josh rises (never shown)
+var weapon := 0          # the weapon in hand (Weapons), kept when hit
+var weapon_supply := 0   # its ammo or durability
+var uzi_shots := 0       # Uzi bullets fired in this burst (the spread pattern)
+var uzi_streak := 0      # Uzi hits in a row on one target
+var uzi_target := 0      # 1 + the fighter the streak is on, or 0
 
 
 func is_active() -> bool:
@@ -59,6 +69,16 @@ func copy_from(o: Fighter) -> void:
 	guts_used = o.guts_used
 	guts_timer = o.guts_timer
 	armor_frames = o.armor_frames
+	kos = o.kos
+	falls = o.falls
+	last_hit_by = o.last_hit_by
+	last_hit_timer = o.last_hit_timer
+	shield = o.shield
+	weapon = o.weapon
+	weapon_supply = o.weapon_supply
+	uzi_shots = o.uzi_shots
+	uzi_streak = o.uzi_streak
+	uzi_target = o.uzi_target
 
 
 func add_to(h: StateHasher) -> void:
@@ -85,3 +105,13 @@ func add_to(h: StateHasher) -> void:
 	h.add_bool(guts_used)
 	h.add_int(guts_timer)
 	h.add_int(armor_frames)
+	h.add_int(kos)
+	h.add_int(falls)
+	h.add_int(last_hit_by)
+	h.add_int(last_hit_timer)
+	h.add_int(shield)
+	h.add_int(weapon)
+	h.add_int(weapon_supply)
+	h.add_int(uzi_shots)
+	h.add_int(uzi_streak)
+	h.add_int(uzi_target)

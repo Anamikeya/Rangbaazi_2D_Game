@@ -30,6 +30,19 @@ static func graybox() -> StageDefinition:
 	return s
 
 
+## Rookie Rooftops (Shan's arena), the default room arena (Stages.Rooftops); all 31 arenas are in
+## ArenaStages, generated from the art pack's layouts.
+static func rooftops() -> StageDefinition:
+	return ArenaStages.by_id("rooftops")
+
+
+## The stage with this id, or null (rooms name their stage in the welcome message).
+static func by_id(stage_id: String) -> StageDefinition:
+	if stage_id == "graybox":
+		return graybox()
+	return ArenaStages.by_id(stage_id)
+
+
 func add_to(h: StateHasher) -> void:
 	for p in platforms:
 		for v in [p.min_x, p.min_y, p.max_x, p.max_y]:

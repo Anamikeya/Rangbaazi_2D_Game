@@ -1,0 +1,356 @@
+{
+ "fighters": [
+  {
+   "id": "shahn",
+   "name": "Shan",
+   "role": "Street Brawler",
+   "type": "human"
+  },
+  {
+   "id": "akshat",
+   "name": "Akshat",
+   "role": "Chef",
+   "type": "human"
+  },
+  {
+   "id": "simran",
+   "name": "Akhmal",
+   "role": "Disc Duelist",
+   "type": "cat"
+  },
+  {
+   "id": "shraddha",
+   "name": "Shraddha",
+   "role": "Courtyard Alien",
+   "type": "alien"
+  },
+  {
+   "id": "vinayak",
+   "name": "Vinayak",
+   "role": "Splash Robot",
+   "type": "robot"
+  },
+  {
+   "id": "saklan",
+   "name": "Saqlain",
+   "role": "Thief",
+   "type": "human"
+  },
+  {
+   "id": "ayush",
+   "name": "Ayush",
+   "role": "Engineer",
+   "type": "human"
+  },
+  {
+   "id": "abhishek",
+   "name": "Abhishek",
+   "role": "Office Worker",
+   "type": "human"
+  },
+  {
+   "id": "shubham",
+   "name": "Shubham",
+   "role": "Gully Slugger",
+   "type": "tiger"
+  },
+  {
+   "id": "rajat",
+   "name": "Rajat",
+   "role": "Trick-Shot Captain",
+   "type": "raccoon"
+  },
+  {
+   "id": "abbas",
+   "name": "Abbas",
+   "role": "Farmer",
+   "type": "human"
+  },
+  {
+   "id": "devanshu",
+   "name": "Devanshu",
+   "role": "Dockside Acrobat",
+   "type": "penguin"
+  },
+  {
+   "id": "siraj",
+   "name": "Siraj",
+   "role": "Akhara Guardian",
+   "type": "stone_golem"
+  },
+  {
+   "id": "nikhil",
+   "name": "Nikhil",
+   "role": "Ninja",
+   "type": "human"
+  },
+  {
+   "id": "avipray",
+   "name": "Abhipray",
+   "role": "Knight",
+   "type": "human"
+  },
+  {
+   "id": "suhani",
+   "name": "Suhani",
+   "role": "Rooftop Archer",
+   "type": "fox"
+  },
+  {
+   "id": "artha",
+   "name": "Aastha",
+   "role": "Precision Ace",
+   "type": "cyborg"
+  },
+  {
+   "id": "sarthak",
+   "name": "Sarthak",
+   "role": "Scrapyard Bruiser",
+   "type": "bear"
+  },
+  {
+   "id": "salik",
+   "name": "Salik",
+   "role": "Robber",
+   "type": "human"
+  },
+  {
+   "id": "aman",
+   "name": "Aman",
+   "role": "Astronaut",
+   "type": "human"
+  },
+  {
+   "id": "tushar",
+   "name": "Tushar",
+   "role": "Frost Fighter",
+   "type": "yeti"
+  },
+  {
+   "id": "faiz",
+   "name": "Faiz",
+   "role": "Tracking Bot",
+   "type": "robot"
+  },
+  {
+   "id": "faizal",
+   "name": "Faizal",
+   "role": "Venom Scientist",
+   "type": "alien"
+  },
+  {
+   "id": "chandan",
+   "name": "Chandan",
+   "role": "Slime Trickster",
+   "type": "slime"
+  },
+  {
+   "id": "rishabh",
+   "name": "Rishabh",
+   "role": "Tech Gunner",
+   "type": "robot"
+  },
+  {
+   "id": "unnati",
+   "name": "Unnati",
+   "role": "Colour Artist",
+   "type": "rabbit"
+  },
+  {
+   "id": "manish",
+   "name": "Manish",
+   "role": "DJ",
+   "type": "human"
+  },
+  {
+   "id": "ankit",
+   "name": "Ankit",
+   "role": "Clown",
+   "type": "human"
+  },
+  {
+   "id": "harsh",
+   "name": "Harsh",
+   "role": "Comedy Brawler",
+   "type": "monkey"
+  },
+  {
+   "id": "akmal",
+   "name": "Simran",
+   "role": "Portal Ghost",
+   "type": "ghost"
+  },
+  {
+   "id": "maaz",
+   "name": "Maaz",
+   "role": "Final Champion",
+   "type": "shadow_creature"
+  }
+ ],
+ "arenas": [
+  {
+   "id": "abbas",
+   "folder": "abbas",
+   "title": "Farmyard Frenzy"
+  },
+  {
+   "id": "abhishek",
+   "folder": "abhishek",
+   "title": "Overtime Office"
+  },
+  {
+   "id": "akmal",
+   "folder": "akmal",
+   "title": "Portal Playground"
+  },
+  {
+   "id": "akshat",
+   "folder": "akshat",
+   "title": "Kitchen Clash"
+  },
+  {
+   "id": "aman",
+   "folder": "aman",
+   "title": "Blast Quarry"
+  },
+  {
+   "id": "ankit",
+   "folder": "ankit",
+   "title": "Toybox Trouble"
+  },
+  {
+   "id": "artha",
+   "folder": "artha",
+   "title": "Sightline City"
+  },
+  {
+   "id": "avipray",
+   "folder": "avipray",
+   "title": "World Duel Dome"
+  },
+  {
+   "id": "ayush",
+   "folder": "ayush",
+   "title": "Jugaad Garage"
+  },
+  {
+   "id": "chandan",
+   "folder": "chandan",
+   "title": "Slimeworks"
+  },
+  {
+   "id": "devanshu",
+   "folder": "devanshu",
+   "title": "Dockside Dash"
+  },
+  {
+   "id": "faiz",
+   "folder": "faiz",
+   "title": "Tracking Yard"
+  },
+  {
+   "id": "faizal",
+   "folder": "faizal",
+   "title": "Neon Greenhouse"
+  },
+  {
+   "id": "harsh",
+   "folder": "harsh",
+   "title": "Laughing Ring"
+  },
+  {
+   "id": "maaz",
+   "folder": "maaz",
+   "title": "Rangbaazi Grand Finale"
+  },
+  {
+   "id": "manish",
+   "folder": "manish",
+   "title": "Skyline Soundstage"
+  },
+  {
+   "id": "nikhil",
+   "folder": "nikhil",
+   "title": "Blade Circuit"
+  },
+  {
+   "id": "rajat",
+   "folder": "rajat",
+   "title": "Sports Rooftops"
+  },
+  {
+   "id": "rishabh",
+   "folder": "rishabh",
+   "title": "Gadget Laboratory"
+  },
+  {
+   "id": "saklan",
+   "folder": "saklan",
+   "title": "Tiffin Terminal"
+  },
+  {
+   "id": "salik",
+   "folder": "salik",
+   "title": "Action Backlot"
+  },
+  {
+   "id": "sarthak",
+   "folder": "sarthak",
+   "title": "Scrapyard Showdown"
+  },
+  {
+   "id": "rooftops",
+   "folder": "shahn",
+   "title": "Rookie Rooftops"
+  },
+  {
+   "id": "shraddha",
+   "folder": "shraddha",
+   "title": "Mohalla Mayhem"
+  },
+  {
+   "id": "shubham",
+   "folder": "shubham",
+   "title": "Gully Stadium"
+  },
+  {
+   "id": "simran",
+   "folder": "simran",
+   "title": "Steel Courtyard"
+  },
+  {
+   "id": "siraj",
+   "folder": "siraj",
+   "title": "Akhara Arena"
+  },
+  {
+   "id": "suhani",
+   "folder": "suhani",
+   "title": "Archer's Ascent"
+  },
+  {
+   "id": "tushar",
+   "folder": "tushar",
+   "title": "Frost Factory"
+  },
+  {
+   "id": "unnati",
+   "folder": "unnati",
+   "title": "Colour Carnival"
+  },
+  {
+   "id": "vinayak",
+   "folder": "vinayak",
+   "title": "Water-Tank Terrace"
+  }
+ ],
+ "easings": [
+  "linear",
+  "step",
+  "in",
+  "out",
+  "in_out",
+  "out_back",
+  "out_elastic"
+ ]
+}

@@ -1,6 +1,9 @@
 # Rangbaazi.Relay
 
-A small WebSocket relay for the web and Android builds of RANGBAAZI. Browsers can't use UDP, so in those builds all online traffic goes through this relay. It pairs two players by room code and forwards their binary game messages byte for byte. It contains no game logic and never references the sim. Rollback netcode stays peer-to-peer in logic; the relay only carries the bytes.
+The online server for the web and Android builds of RANGBAAZI. Browsers can't use UDP, so in those builds all online traffic goes through it. It has two kinds of room:
+
+- **Duel rooms** (`/relay/room/{code}`): it pairs two players by room code and forwards their binary game messages byte for byte, with no game logic. Rollback netcode stays peer-to-peer in logic; the relay only carries the bytes.
+- **Arena rooms** (`/relay/arena/{code}`, see "Arena rooms" below): up to 15 players, and the server runs the match itself with the deterministic sim (`src/Rangbaazi.Sim`), sending everyone the state every frame.
 
 It runs on an AWS EC2 `t4g.nano` (Graviton, Amazon Linux 2023) behind CloudFront. CloudFront terminates `https`/`wss` and forwards `/relay/*` to the instance over plain HTTP on port 8080.
 
@@ -46,6 +49,16 @@ Ordering: everything a player receives from its partner arrives between that pai
 How the rate limit counts: each frame the relay reads takes one token. A message sent as one frame, which is what browsers and Godot do, is one token. A fragmented message takes one token per fragment, and a TEXT frame over 256 bytes takes one token per 257 bytes. That way empty or endless fragments can't get around the limit.
 
 Keepalive (the client must do this): every 15 s the server sends a keep-alive control frame. On .NET 8 that is an unsolicited pong, which clients don't answer. It keeps CloudFront and NAT boxes from dropping a quiet connection, but it tells the relay nothing about the client, and control frames from the client (pings, pongs) don't count as activity either. So a client waiting for a partner must send a small TEXT frame, for example `{"type":"ping"}`, every 20 to 30 s, or it is closed with `4003` after 60 s. During a match the game traffic is enough.
+
+## Arena rooms
+
+`/relay/arena/{code}?host=1&minutes=10&name=Ravi` (WebSocket). With `host=1` the code must be free and the room is created; without it the room must exist. `minutes` (10 to 15, default 10) is the match length; `name` is cleaned to letters, digits, spaces, `-` and `_`, at most 12 characters. A room holds up to 15 members, people and CPUs; the first person is the host, and the role passes on when the host leaves. The room closes when its last person leaves. Someone who joins during a match watches it and plays in the next one.
+
+**Client to server.** TEXT requests (JSON, at most 512 bytes): `{"type":"settings","minutes":12}`, `{"type":"bots","count":3}`, `{"type":"start"}` and `{"type":"end"}` (host only, in the lobby; `end` during a match), `{"type":"chat","phrase":0}` (a quick-chat phrase number, 0 to 15; the words live in the client, so nobody can send free text; at most one a second), `{"type":"ping"}` (keepalive). BINARY `INPUT`: 3 bytes, `1` then the buttons as a little-endian 16-bit number (`Buttons` bits). A button pressed and released between two frames still counts for the next frame.
+
+**Server to client.** TEXT: `lobby` (room, phase, minutes, your id, the host's id, the members), `start` (stage, minutes, `time_limit_frames`, your fighter index or -1, the fighters' names and whether each is a CPU), `chat` (who sent which phrase), `error` (`code` and `message`). Refusals send `error` and close: `full` 4001, `busy` 4002, `taken` 4004 (a host's code is in use), `no_room` 4005. BINARY `STATE`, 60 a second during a match (`ArenaBinary.EncodeState`): frame, frames left on the clock, match over and winner, then 26 bytes per fighter (position, facing, action, move, flags, action frame, Josh, KOs, falls, hit-stop, armor, Guts timer, hitstun, dodge cooldown). Hidden values (the respawn second wind) are never sent.
+
+**The match.** `MatchRules.Room`: Rookie Rooftops (`Stages.Rooftops`), a timed free-for-all where ring-outs respawn and score a KO for the last attacker, rage and the hidden second wind. One thread runs every room's frame at 60 Hz; CPUs play through `SparringBot`. After the result the room returns to the lobby on its own after 15 seconds.
 
 ## Configuration (environment variables)
 
