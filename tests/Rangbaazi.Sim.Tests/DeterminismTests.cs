@@ -120,7 +120,7 @@ public class DeterminismTests
         const BindingFlags instance = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
         foreach (FieldInfo field in typeof(GameState).GetFields(instance))
         {
-            if (field.Name is nameof(GameState.Fighters) or nameof(GameState.Props)) continue; // covered field by field
+            if (field.Name is nameof(GameState.Fighters) or nameof(GameState.Props) or nameof(GameState.WeaponStats)) continue; // covered on their own
             bool holdsReferences = (bool)typeof(System.Runtime.CompilerServices.RuntimeHelpers)
                 .GetMethod(nameof(System.Runtime.CompilerServices.RuntimeHelpers.IsReferenceOrContainsReferences))!
                 .MakeGenericMethod(field.FieldType).Invoke(null, null)!;
@@ -161,6 +161,21 @@ public class DeterminismTests
                 clone.Props[3].Timer++;
                 Assert.NotEqual(clone.Checksum(), copy.Checksum()); // the clone has its own array
             }
+        }
+    }
+
+    [Fact]
+    public void ChecksumAndCloneCoverEveryWeaponStat()
+    {
+        var s = Simulation.CreateInitialState(Rules, 2, 1);
+        Assert.Equal(2 * Weapons.Count * 3, s.WeaponStats.Length);
+        for (int i = 0; i < s.WeaponStats.Length; i++)
+        {
+            GameState copy = s.Clone();
+            copy.WeaponStats[i]++;
+            Assert.True(s.Checksum() != copy.Checksum(), $"the checksum ignores WeaponStats[{i}]");
+            Assert.Equal(copy.Checksum(), copy.Clone().Checksum());
+            Assert.Equal(0, s.WeaponStats[i]); // the clone has its own array
         }
     }
 

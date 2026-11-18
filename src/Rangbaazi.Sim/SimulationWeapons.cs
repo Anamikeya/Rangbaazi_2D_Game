@@ -332,6 +332,7 @@ public static partial class Simulation
                     {
                         hit.Damage = 3; // keeping on target: the stream holds them
                         hit.HitstunBonus = 0;
+                        hit.Sweet = true;
                     }
                 }
                 break;
@@ -344,8 +345,9 @@ public static partial class Simulation
                 break;
         }
         if (rules.SignatureOf(owner) == p.Weapon) hit.Percent = hit.Percent * Weapons.SignaturePercent / 100;
+        hit.Weapon = p.Weapon;
         int side = p.Velocity.X < Fix.Zero ? -1 : 1;
-        LandHit(fighters, owner, target, in hit, side, freezeAttacker: false, rules);
+        LandHit(state, owner, target, in hit, side, freezeAttacker: false, rules);
     }
 
     /// <summary>
@@ -369,8 +371,9 @@ public static partial class Simulation
             var hit = new Hit(Weapons.BombLob);
             if (d == direct && from != d) hit.Sweeten();
             if (rules.SignatureOf(from) == p.Weapon) hit.Percent = hit.Percent * Weapons.SignaturePercent / 100;
+            hit.Weapon = p.Weapon;
             int side = def.Position.X >= p.Position.X ? 1 : -1;
-            LandHit(fighters, from, d, in hit, side, freezeAttacker: false, rules);
+            LandHit(state, from, d, in hit, side, freezeAttacker: false, rules);
         }
     }
 

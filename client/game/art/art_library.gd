@@ -105,6 +105,13 @@ static func arena_texture(stage_id: String, file: String) -> Texture2D:
 	return _texture("%s/arenas/%s/%s" % [ROOT, stage_id, file])
 
 
+## A fighter's effect sprite: kind is "hit", "dodge" or "landing". Null if there is none.
+static func effect_texture(character_id: String, kind: String) -> Texture2D:
+	if character_id == "":
+		return null
+	return _texture("%s/effects/%s-%s.wbin" % [ROOT, character_id, kind])
+
+
 ## A weapon's sprite (tools/cut_weapons.gd), by the sim's weapon id, or null.
 static func weapon_texture(weapon: int) -> Texture2D:
 	return _texture("%s/weapons/%d.wbin" % [ROOT, weapon])

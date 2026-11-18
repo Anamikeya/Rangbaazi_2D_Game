@@ -21,9 +21,17 @@ public sealed class GameState
     public int PropTimer;
     public WeaponId LastBoxWeapon;
 
+    /// <summary>
+    /// Each fighter's match record with each weapon (0 is fists), for the winner's nickname:
+    /// [fighter * Weapons.Count * 3 + weapon * 3 + stat], stat 0 damage dealt to others, 1 KOs,
+    /// 2 sweet-spot hits. In the rollback state so a rollback never counts a hit twice.
+    /// </summary>
+    public int[] WeaponStats;
+
     public GameState(int fighterCount, ulong seed)
     {
         Fighters = new Fighter[fighterCount];
+        WeaponStats = new int[fighterCount * Weapons.Count * 3];
         Random = new SimRandom(seed);
     }
 
@@ -46,6 +54,7 @@ public sealed class GameState
         Array.Copy(other.Props, Props, Props.Length);
         PropTimer = other.PropTimer;
         LastBoxWeapon = other.LastBoxWeapon;
+        Array.Copy(other.WeaponStats, WeaponStats, WeaponStats.Length);
     }
 
     /// <summary>Stable checksum used for desync detection between peers.</summary>
@@ -60,6 +69,7 @@ public sealed class GameState
         h.Add(PropTimer);
         h.Add((int)LastBoxWeapon);
         for (int i = 0; i < Props.Length; i++) Props[i].AddTo(ref h);
+        for (int i = 0; i < WeaponStats.Length; i++) h.Add(WeaponStats[i]);
         return h.Value;
     }
 }

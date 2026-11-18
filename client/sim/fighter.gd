@@ -39,6 +39,10 @@ var weapon_supply := 0   # its ammo or durability
 var uzi_shots := 0       # Uzi bullets fired in this burst (the spread pattern)
 var uzi_streak := 0      # Uzi hits in a row on one target
 var uzi_target := 0      # 1 + the fighter the streak is on, or 0
+var flurry_next: int = MoveData.Id.NONE # the second hit of a fist flurry, queued; or NONE
+var last_hit_weapon := 0 # the weapon the last hit taken came from (0: fists or a hazard)
+var last_hit_sweet := false # that hit was a sweet spot
+var hit_count := 0       # goes up on every hit taken, so a renderer can tell a new hit
 
 
 func is_active() -> bool:
@@ -79,6 +83,10 @@ func copy_from(o: Fighter) -> void:
 	uzi_shots = o.uzi_shots
 	uzi_streak = o.uzi_streak
 	uzi_target = o.uzi_target
+	flurry_next = o.flurry_next
+	last_hit_weapon = o.last_hit_weapon
+	last_hit_sweet = o.last_hit_sweet
+	hit_count = o.hit_count
 
 
 func add_to(h: StateHasher) -> void:
@@ -115,3 +123,7 @@ func add_to(h: StateHasher) -> void:
 	h.add_int(uzi_shots)
 	h.add_int(uzi_streak)
 	h.add_int(uzi_target)
+	h.add_int(flurry_next)
+	h.add_int(last_hit_weapon)
+	h.add_bool(last_hit_sweet)
+	h.add_int(hit_count)

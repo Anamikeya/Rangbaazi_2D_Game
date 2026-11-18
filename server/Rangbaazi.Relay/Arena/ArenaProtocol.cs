@@ -15,10 +15,11 @@ internal static class ArenaLimits
     public const int MaxPlayers = 15;
 
     /// <summary>
-    /// The arena protocol version clients send as <c>v=</c>. 2 added weapons to STATE; older clients
-    /// are turned away with a message to update, instead of misreading the frames.
+    /// The arena protocol version clients send as <c>v=</c>. 2 added weapons to STATE; 3 added each
+    /// fighter's last hit and main weapon. Older clients are turned away with a message to update,
+    /// instead of misreading the frames.
     /// </summary>
-    public const int ProtocolVersion = 2;
+    public const int ProtocolVersion = 3;
     public const int MinMinutes = 10;
     public const int MaxMinutes = 15;
     public const int DefaultMinutes = 10;
@@ -195,7 +196,7 @@ internal static class ArenaBinary
     public const byte Input = 1;
     public const byte State = 2;
     public const int HeaderBytes = 12;
-    public const int FighterBytes = 28;
+    public const int FighterBytes = 31;
     public const int PropBytes = 12;
 
     /// <summary>Every defined button (Left to Taunt); anything else is masked off.</summary>
@@ -222,7 +223,9 @@ internal static class ArenaBinary
     /// (i8, -1 none), fighter count (u8), then per fighter: x, y (i32 raw fixed point, metres x 65536),
     /// facing (i8), action, move, flags (1 grounded, 2 frozen by a hit, 4 attack connected, 8 Guts
     /// used, 16 air dodge used), action frame (u16), Josh, KOs, falls (u16 each), hit-stop, armor
-    /// (u8), Guts timer (u16), hitstun, dodge cooldown, weapon, weapon supply (u8). Then the props
+    /// (u8), Guts timer (u16), hitstun, dodge cooldown, weapon, weapon supply (u8), the last
+    /// hit taken (u8: its weapon, +128 for a sweet spot), the hit count (u8, wrapping), and the main
+    /// weapon so far (u8: 0-7, or 15 for an all-rounder, +128 for a master). Then the props
     /// in use: count (u8), and per prop: kind, weapon, shot kind (u8), x, y (i32 raw), facing of its
     /// flight (i8: -1, 0, 1).
     /// Little-endian.
@@ -263,6 +266,10 @@ internal static class ArenaBinary
             s[o + 25] = U8(f.DodgeCooldown);
             s[o + 26] = (byte)f.Weapon;
             s[o + 27] = U8(f.WeaponSupply);
+            s[o + 28] = (byte)((int)f.LastHitWeapon | (f.LastHitSweet ? 128 : 0));
+            s[o + 29] = (byte)f.HitCount;
+            int main = Simulation.MainWeapon(state, i, out bool master);
+            s[o + 30] = (byte)((main < 0 ? 15 : main) | (master ? 128 : 0));
         }
         s[o++] = (byte)props;
         foreach (Prop p in state.Props)

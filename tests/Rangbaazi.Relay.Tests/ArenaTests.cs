@@ -168,8 +168,9 @@ public sealed class ArenaTests
         Assert.Equal(4, FighterCount(first));
         int x0 = X(first, 1);
 
-        // Hold right: the guest's fighter (index 1, which starts on the right) runs right.
-        for (int i = 0; i < 40; i++)
+        // Hold right: the guest's fighter (index 1, which starts on the right) runs right. Kept short,
+        // so it is checked before the first weapon crate drops (1.5 s in) and a CPU can shoot it back.
+        for (int i = 0; i < 12; i++)
         {
             await SendInput(guest, Buttons.Right);
             await Task.Delay(5);
@@ -274,12 +275,23 @@ public sealed class ArenaTests
         GameState state = Simulation.CreateInitialState(rules, 2, 1);
         state.Fighters[1].Weapon = WeaponId.Bow;
         state.Fighters[1].WeaponSupply = 5;
+        state.Fighters[1].LastHitWeapon = WeaponId.Uzi;
+        state.Fighters[1].LastHitSweet = true;
+        state.Fighters[1].HitCount = 3;
+        int bow = (int)WeaponId.Bow * 3; // fighter 0's record with the bow: damage, a KO, 3 sweet spots
+        state.WeaponStats[bow] = 40;
+        state.WeaponStats[bow + 1] = 1;
+        state.WeaponStats[bow + 2] = 3;
         state.Props[4] = new Prop { Kind = PropKind.Shot, Shot = ShotKind.Arrow, Weapon = WeaponId.Bow, Position = new FixVec2(Fix.FromInt(3), Fix.One), Velocity = new FixVec2(-Fix.Half, Fix.Zero) };
         state.Props[9] = new Prop { Kind = PropKind.PendingBox, Weapon = WeaponId.Uzi }; // not on the stage yet: not sent
         byte[] bytes = ArenaBinary.EncodeState(state, rules);
         int o = ArenaBinary.HeaderBytes + ArenaBinary.FighterBytes;
         Assert.Equal((byte)WeaponId.Bow, bytes[o + 26]);
         Assert.Equal(5, bytes[o + 27]);
+        Assert.Equal((byte)WeaponId.Uzi | 128, bytes[o + 28]); // the last hit: an Uzi sweet spot
+        Assert.Equal(3, bytes[o + 29]);
+        Assert.Equal(15, bytes[o + 30]);                        // no damage dealt yet: an all-rounder
+        Assert.Equal((byte)WeaponId.Bow | 128, bytes[ArenaBinary.HeaderBytes + 30]); // fighter 0: a bow master
         o = ArenaBinary.HeaderBytes + 2 * ArenaBinary.FighterBytes;
         Assert.Equal(1, bytes[o]);
         Assert.Equal(o + 1 + ArenaBinary.PropBytes, bytes.Length);

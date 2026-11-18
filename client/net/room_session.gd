@@ -14,10 +14,10 @@ enum Phase { CONNECTING, LOBBY, PLAYING, ENDED }
 const INPUT := 1
 const STATE := 2
 const HEADER_BYTES := 12
-const FIGHTER_BYTES := 28
+const FIGHTER_BYTES := 31
 const PROP_BYTES := 12
-## The arena protocol version sent as v= (ArenaLimits.ProtocolVersion): 2 added weapons.
-const PROTOCOL_VERSION := 2
+## The arena protocol version sent as v= (ArenaLimits.ProtocolVersion): 2 added weapons, 3 the last hit and main weapon.
+const PROTOCOL_VERSION := 3
 ## Frames the jitter buffer tries to keep ready; past MAX_BUFFER it skips ahead to catch up.
 const TARGET_BUFFER := 3
 const MAX_BUFFER := 10
@@ -55,6 +55,9 @@ var room_phase := "lobby"
 # The match, from "start" and the STATE frames.
 var rules: MatchRules
 var state: GameState
+## Each fighter's main weapon so far, as the server sends it: 0-7 (0 is fists), or 15 for an
+## all-rounder, +128 for a master (Simulation.main_weapon). For the winner's nickname.
+var main_weapons: PackedInt32Array = []
 var fighter_names: PackedStringArray = []
 var fighter_cpu: Array[bool] = []
 var fighter_characters: PackedStringArray = []
@@ -284,6 +287,8 @@ func _apply(p: PackedByteArray) -> void:
 	if state == null or n != state.fighters.size() or p.size() < HEADER_BYTES + FIGHTER_BYTES * n:
 		return
 	state.frame = p.decode_u32(1)
+	if main_weapons.size() != n:
+		main_weapons.resize(n)
 	frames_left = p.decode_u32(5)
 	state.match_over = (p[9] & 1) != 0
 	state.winner_index = p.decode_s8(10)
@@ -312,6 +317,10 @@ func _apply(p: PackedByteArray) -> void:
 		f.dodge_cooldown = p[o + 25]
 		f.weapon = p[o + 26]
 		f.weapon_supply = p[o + 27]
+		f.last_hit_weapon = p[o + 28] & 127
+		f.last_hit_sweet = (p[o + 28] & 128) != 0
+		f.hit_count = p[o + 29]
+		main_weapons[i] = p[o + 30]
 	# The props in use, into the first slots; the rest are cleared.
 	var at := HEADER_BYTES + FIGHTER_BYTES * n
 	var count := p[at] if p.size() > at else 0

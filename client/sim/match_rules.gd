@@ -33,6 +33,12 @@ var rage_percent := 0
 var rage_josh := 150
 ## Hidden second wind: after a respawn, this much incoming damage is absorbed. 0 is off.
 var respawn_shield := 0
+## The fist flurry: empty-handed, Light and Heavy pressed on the same frame start one of four
+## combos at random, with equal odds (a jab; a neutral heavy; a jab then a neutral heavy; two
+## neutral heavies). Off, both together are the heavy.
+var flurry := false
+## The stage's hazards run (StageDefinition.hazard_*). Off, they are scenery.
+var hazards := false
 ## Prop Boxes drop weapons (Weapons). Off, the match is fists only.
 var weapons := false
 ## Each fighter's own weapon, by fighter index (Weapons.signature_for): with it their hits do
@@ -53,6 +59,8 @@ static func room(stage_def: StageDefinition, minutes: int, signature_list := Pac
 	r.rage_percent = 50
 	r.respawn_shield = 20
 	r.weapons = true
+	r.hazards = true
+	r.flurry = true
 	r.signatures = signature_list
 	return r
 
@@ -64,7 +72,7 @@ func fingerprint() -> int:
 	h.add_int(Simulation.SIM_VERSION)
 	for v in [stocks, respawn_frames, max_josh, guts, guts_josh, guts_delay_frames, guts_heal,
 			guts_armor_frames, min_hit_stop, max_hit_stop, time_limit_frames, ko_credit_frames,
-			rage_percent, rage_josh, respawn_shield, weapons]:
+			rage_percent, rage_josh, respawn_shield, weapons, flurry, hazards]:
 		h.add_u64(int(v))
 	h.add_int(signatures.size())
 	for w in signatures:

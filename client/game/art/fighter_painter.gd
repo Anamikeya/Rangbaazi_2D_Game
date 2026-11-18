@@ -17,7 +17,24 @@ const MOVE_CLIPS := {
 	MoveData.Id.UP_HEAVY: "up_heavy", MoveData.Id.DOWN_HEAVY: "down_heavy",
 }
 
+## Weapon attacks borrow a fist move's poses, stretched so the clip's strike lands on the weapon's
+## release frame: [clip, the clip's strike frame].
+const WEAPON_CLIPS := {
+	MoveData.Id.BELAN_BONK: ["neutral_heavy", 14], MoveData.Id.BAT_SWING: ["side_heavy", 16],
+	MoveData.Id.SHOTGUN_BLAST: ["jab", 4], MoveData.Id.BALL_ROLL: ["down_heavy", 12],
+	MoveData.Id.UZI_FIRE: ["jab", 4], MoveData.Id.BOMB_LOB: ["neutral_heavy", 14],
+	MoveData.Id.BOW_SHOT: ["jab", 4], MoveData.Id.WEAPON_THROW: ["jab", 4],
+}
+const FIDGET_AFTER := 300 # frames standing still before an idle fidget
+const HARD_LANDING := 0.22 # metres per frame of fall speed
+
+## Match result for pick(): nothing yet, this fighter won, or it lost.
+enum Result { NONE, WON, LOST }
+
 var character_id := "shahn"
+## Where the front hand was drawn last (screen pixels), for the weapon it holds.
+var hand_position := Vector2.ZERO
+var hand_valid := false
 var _rig: Dictionary = {}
 # Live springs: part -> [angle, angular velocity].
 var _springs: Dictionary = {}
@@ -27,6 +44,18 @@ var _have_last := false
 var _vx := 0.0 # metres per frame, from the fighter's positions (the server doesn't send velocity)
 var _vy := 0.0
 var _last_frame := -1
+# One-shot moves the sim doesn't know about (landing, jumping, respawning, fidgets): the clip
+# playing now and the frame it started on.
+var _shot := ""
+var _shot_start := 0
+var _shot_air := false
+var _prev_action := -1
+var _prev_grounded := false
+var _prev_hit_stop := 0
+var _prev_running := false
+var _still_frames := 0
+var _fidget_b := false
+var _result_start := -1
 
 
 func _init(id: String) -> void:
@@ -47,7 +76,10 @@ func observe(f: Fighter, frame: int) -> void:
 		return
 	var x := Fx.to_float(f.pos_x)
 	var y := Fx.to_float(f.pos_y)
-	if _have_last and frame == _last_frame + 1:
+	var steady := _have_last and frame == _last_frame + 1
+	var fall_speed := -_vy
+	var old_vy := _vy
+	if steady:
 		_vx = x - _last_x
 		_vy = y - _last_y
 	else:
@@ -58,11 +90,64 @@ func observe(f: Fighter, frame: int) -> void:
 	_have_last = true
 	_last_frame = frame
 	_step_springs()
+	if steady:
+		_watch(f, frame, fall_speed, old_vy)
+	else:
+		_shot = ""
+	_prev_action = f.action
+	_prev_grounded = f.grounded
+	_prev_hit_stop = f.hit_stop
+	_prev_running = f.grounded and absf(_vx) > 0.03
 
 
-## The move and frame to show for this fighter: [clip name, frame].
-func pick(f: Fighter, frame: int) -> Array:
+## Starts the one-shot moves: landing (soft or hard), the jump and air jump, coming back after a
+## KO, a parry landing, starting and stopping a run, and a fidget after standing still a while.
+func _watch(f: Fighter, frame: int, fall_speed: float, old_vy: float) -> void:
+	var idle := f.action == Fighter.Action.IDLE
+	var running := f.grounded and absf(_vx) > 0.03
+	if _prev_action == Fighter.Action.RESPAWNING and f.is_active():
+		_start("respawn", frame, true)
+	elif idle and f.grounded and not _prev_grounded:
+		_start("land_hard" if fall_speed >= HARD_LANDING else "land_soft", frame, false)
+	elif idle and not f.grounded and _prev_grounded and _vy > 0.1:
+		_start("ground_jump", frame, true)
+	elif idle and not f.grounded and not _prev_grounded and _vy - old_vy > 0.1 and _prev_action == Fighter.Action.IDLE:
+		_start("air_jump", frame, true)
+	elif idle and f.hit_stop > 0 and _prev_hit_stop == 0 and not f.frozen_by_hit and _prev_action == Fighter.Action.DODGE:
+		_start("parry_success", frame, not f.grounded)
+	elif idle and running and not _prev_running and _prev_grounded and _shot == "":
+		_start("run_start", frame, false)
+	elif idle and f.grounded and not running and _prev_running:
+		_start("skid_stop", frame, false)
+	if idle and f.grounded and not running:
+		_still_frames += 1
+		if _still_frames >= FIDGET_AFTER and _shot == "":
+			_start("idle_fidget_b" if _fidget_b else "idle_fidget_a", frame, false)
+			_fidget_b = not _fidget_b
+			_still_frames = 0
+	else:
+		_still_frames = 0
+
+
+func _start(clip_name: String, frame: int, in_air: bool) -> void:
+	if ArtLibrary.clip(character_id, clip_name).is_empty():
+		return
+	_shot = clip_name
+	_shot_start = frame
+	_shot_air = in_air
+
+
+## The move and frame to show for this fighter: [clip name, frame]. `result` is how the match
+## ended for it (Result), so winners celebrate and the rest slump. `rules` gives weapon moves
+## their timing.
+func pick(f: Fighter, frame: int, result: int = Result.NONE, rules: MatchRules = null) -> Array:
 	var af := f.action_frame
+	if result != Result.NONE and f.grounded and (f.action == Fighter.Action.IDLE):
+		if _result_start < 0:
+			_result_start = frame
+		return ["victory_a" if result == Result.WON else "defeat", frame - _result_start]
+	if result == Result.NONE:
+		_result_start = -1
 	match f.action:
 		Fighter.Action.ATTACK:
 			if f.move == MoveData.Id.GROUND_SLAM:
@@ -71,6 +156,8 @@ func pick(f: Fighter, frame: int) -> Array:
 				if not f.grounded and af < 49:
 					return ["ground_slam_plunge", af - SLAM_HANG]
 				return ["ground_slam_impact", maxi(0, af - 49)]
+			if WEAPON_CLIPS.has(f.move) and rules != null:
+				return _weapon_pose(f, rules)
 			return [MOVE_CLIPS.get(f.move, "jab"), af]
 		Fighter.Action.DODGE:
 			if not f.grounded:
@@ -84,6 +171,18 @@ func pick(f: Fighter, frame: int) -> Array:
 			return ["hitstun", af]
 		Fighter.Action.STUNNED:
 			return ["parried_stun", af]
+	# A one-shot keeps playing while the fighter stays as it was when it started (in the air or on
+	# the ground) and until its clip runs out.
+	if _shot != "" and f.action == Fighter.Action.IDLE:
+		var played := frame - _shot_start
+		var length := int(ArtLibrary.clip(character_id, _shot).get("d", 1))
+		var fits := (not f.grounded) if _shot_air and _shot != "respawn" and _shot != "parry_success" else (f.grounded or _shot_air)
+		var run_breaks := absf(_vx) > 0.03 and (_shot.begins_with("land") or _shot.begins_with("idle_fidget") or _shot == "skid_stop")
+		if played >= 0 and played < length and fits and not run_breaks:
+			return [_shot, played]
+		_shot = ""
+	elif f.action != Fighter.Action.IDLE:
+		_shot = ""
 	if not f.grounded:
 		return ["rising" if _vy > 0.02 else ("apex" if _vy > -0.04 else "falling_loop"), frame]
 	if absf(_vx) > 0.03:
@@ -91,9 +190,25 @@ func pick(f: Fighter, frame: int) -> Array:
 	return ["idle", frame]
 
 
+## A weapon attack's pose: a fist move's clip, with its wind-up stretched to end on the weapon's
+## release frame and its follow-through stretched over the weapon's recovery.
+func _weapon_pose(f: Fighter, rules: MatchRules) -> Array:
+	var entry: Array = WEAPON_CLIPS[f.move]
+	var clip := ArtLibrary.clip(character_id, str(entry[0]))
+	var length := int(clip.get("d", 1))
+	var strike := int(entry[1])
+	var m := rules.tuning.moves.get_move(f.move)
+	var af := float(f.action_frame)
+	var cf := af * strike / maxf(1.0, m.startup)
+	if af > m.startup:
+		cf = strike + (af - m.startup) * (length - strike) / maxf(1.0, m.total_frames() - m.startup)
+	return [str(entry[0]), clampi(int(cf), 0, length - 1)]
+
+
 ## Draws the fighter on `canvas` with its feet at `feet` (screen pixels), `px` screen pixels per
 ## logical art pixel, facing +1 right or -1 left. Optional move override for menus (e.g. "idle").
-func draw(canvas: CanvasItem, feet: Vector2, px: float, facing: int, clip_name: String, frame: int, alpha := 1.0) -> void:
+func draw(canvas: CanvasItem, feet: Vector2, px: float, facing: int, clip_name: String, frame: int, alpha := 1.0, tint := Color.WHITE) -> void:
+	hand_valid = false
 	if _rig.is_empty():
 		return
 	var clip := ArtLibrary.clip(character_id, clip_name)
@@ -114,6 +229,9 @@ func draw(canvas: CanvasItem, feet: Vector2, px: float, facing: int, clip_name: 
 		var parent := str(spec.get("parent", ""))
 		var m: Transform2D = (world[parent] if world.has(parent) else _part_transform(clip, parent, f, parts)) * local if parent != "" else local
 		world[part] = m
+		if part == "frontHand":
+			hand_position = (base * m).origin
+			hand_valid = true
 		var slot := _slot(clip, part, f, spec)
 		var textures: Dictionary = spec.get("textures", {})
 		if not textures.has(slot):
@@ -134,7 +252,7 @@ func draw(canvas: CanvasItem, feet: Vector2, px: float, facing: int, clip_name: 
 			pivot = geo.get("pivot", pivot)
 		canvas.draw_set_transform_matrix(base * m)
 		var rect := Rect2(-w * float(pivot["x"]), -h * float(pivot["y"]), w, h)
-		canvas.draw_texture_rect(tex, rect, false, Color(1, 1, 1, clampf(pose[5], 0.0, 1.0) * alpha))
+		canvas.draw_texture_rect(tex, rect, false, Color(tint.r, tint.g, tint.b, clampf(pose[5], 0.0, 1.0) * alpha))
 	canvas.draw_set_transform_matrix(Transform2D.IDENTITY)
 
 

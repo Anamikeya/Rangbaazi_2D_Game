@@ -8,6 +8,7 @@ signal closed
 var _fps: Button
 var _effects: Button
 var _hitboxes: Button
+var _camera: Button
 var _debug: Button
 
 
@@ -41,6 +42,7 @@ func _ready() -> void:
 	_fps = _toggle(column, func() -> void:
 		var i := GameSettings.FPS_CHOICES.find(GameSettings.max_fps)
 		GameSettings.max_fps = GameSettings.FPS_CHOICES[(i + 1) % GameSettings.FPS_CHOICES.size()])
+	_camera = _toggle(column, func() -> void: GameSettings.follow_camera = not GameSettings.follow_camera)
 	_effects = _toggle(column, func() -> void: GameSettings.effects = not GameSettings.effects)
 	_hitboxes = _toggle(column, func() -> void: GameSettings.show_hitboxes = not GameSettings.show_hitboxes)
 	_debug = _toggle(column, func() -> void: GameSettings.show_debug = not GameSettings.show_debug)
@@ -112,6 +114,7 @@ func _refresh() -> void:
 	if _fps == null:
 		return
 	_fps.text = "Frame rate: %d fps" % GameSettings.max_fps
+	_camera.text = "Camera: %s" % ("follows the fight" if GameSettings.follow_camera else "whole arena")
 	_effects.text = "Effects (hit shake): %s" % ("on" if GameSettings.effects else "off")
 	_hitboxes.text = "Show hitboxes: %s" % ("on" if GameSettings.show_hitboxes else "off")
 	_debug.text = "Debug info: %s" % ("on" if GameSettings.show_debug else "off")

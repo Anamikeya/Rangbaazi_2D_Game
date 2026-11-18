@@ -96,6 +96,9 @@ var _copy_button: Button
 
 # The panel the menu button opens (its own CanvasLayer, over the touch controls).
 var _panel_layer: CanvasLayer
+# The how-to-play card (its own CanvasLayer, over everything in a match).
+var _help_layer: CanvasLayer
+var _help_controls: Label
 var _panel_title: Label
 var _panel_note: Label
 var _restart_button: Button
@@ -137,6 +140,11 @@ func _build_nodes() -> void:
 	_sound = SoundDirector.new()
 	_sound.name = "Sound"
 	add_child(_sound)
+	# Every button in the game clicks when pressed (menus, the lobby, the panels).
+	get_tree().node_added.connect(func(node: Node) -> void:
+		var button := node as BaseButton
+		if button != null:
+			button.pressed.connect(func() -> void: _sound.play("click", -6.0)))
 	_arena = ArenaView.new()
 	_arena.name = "Arena"
 	add_child(_arena)
@@ -182,6 +190,7 @@ func _build_nodes() -> void:
 	touch_layer.add_child(_touch)
 
 	_build_panel()
+	_build_help()
 	_build_chat()
 
 	var room_layer := CanvasLayer.new()
@@ -315,6 +324,9 @@ func _build_panel() -> void:
 	column.add_child(_panel_note)
 
 	_panel_button(column, "Resume", _close_panel)
+	_panel_button(column, "How to play", func() -> void:
+		_close_panel()
+		_open_help())
 	_restart_button = _panel_button(column, "Restart", func() -> void:
 		_restart_practice()
 		_close_panel())
@@ -327,6 +339,80 @@ func _build_panel() -> void:
 			_room_session.end_match()
 		_close_panel())
 	_panel_button(column, "Leave match", _go_to_menu.bind(""))
+
+
+## The how-to-play card: shown once before the first match (practice waits behind it), and from
+## the match menu. Three short lines and the controls for this device.
+func _build_help() -> void:
+	_help_layer = CanvasLayer.new()
+	_help_layer.name = "Help"
+	_help_layer.layer = 5
+	_help_layer.visible = false
+	add_child(_help_layer)
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.theme = UiTheme.build()
+	_help_layer.add_child(root)
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.05, 0.045, 0.07, 0.72)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.add_child(backdrop)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(center)
+	var box := PanelContainer.new()
+	box.add_theme_stylebox_override("panel", UiTheme.panel_box())
+	center.add_child(box)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 18)
+	column.custom_minimum_size = Vector2(980, 0)
+	box.add_child(column)
+
+	var title := Label.new()
+	title.text = "HOW TO PLAY"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 56)
+	title.add_theme_color_override("font_color", UiTheme.ACCENT)
+	column.add_child(title)
+	for line: String in [
+		"Knock everyone off the stage. The higher their %, the farther they fly.",
+		"Crates drop weapons. Touch one to grab it; touch another to swap.",
+		"Dodge just as a hit lands to parry it and stun them.",
+	]:
+		var l := Label.new()
+		l.text = line
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.add_theme_font_size_override("font_size", 32)
+		column.add_child(l)
+	_help_controls = Label.new()
+	_help_controls.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_help_controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_help_controls.add_theme_font_size_override("font_size", 28)
+	_help_controls.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
+	column.add_child(_help_controls)
+	var ok := _hud_button(column, "Got it", _close_help)
+	ok.custom_minimum_size = Vector2(0, 110)
+	ok.add_theme_font_size_override("font_size", 44)
+
+
+func _open_help() -> void:
+	_help_controls.text = "Kick: attack, or use your weapon.   Heavy: a big hit (with a direction, a different one).\n" \
+		+ "Up + Heavy: leap back to the stage.   Combo: a random flurry of punches.   Throw: hurl your weapon." if _prefer_touch else \
+		"A / D move   Space jump (twice)   J attack or use your weapon   K heavy (W + K leaps back to the stage)\n" \
+		+ "L dodge   I combo (a random flurry)   U throw your weapon   Esc menu"
+	_help_layer.show()
+	_update_touch()
+
+
+func _close_help() -> void:
+	_help_layer.hide()
+	if not GameSettings.seen_help:
+		GameSettings.seen_help = true
+		GameSettings.save()
+	get_viewport().gui_release_focus()
+	_update_touch()
 
 
 func _panel_button(parent: Control, text: String, on_pressed: Callable) -> Button:
@@ -407,7 +493,7 @@ func _close_chat() -> void:
 ## the panel's buttons can't also press a fighter's).
 func _update_touch() -> void:
 	var in_match := _mode != Mode.ROOM or (_room_session != null and _room_session.phase == RoomSession.Phase.PLAYING)
-	var want := _mode != Mode.MENU and in_match and _prefer_touch and not _panel_open() and not _chat_layer.visible
+	var want := _mode != Mode.MENU and in_match and _prefer_touch and not _panel_open() and not _chat_layer.visible and not _help_layer.visible
 	if _touch.visible != want:
 		_touch.visible = want
 
@@ -420,6 +506,7 @@ func _go_to_menu(message: String = "") -> void:
 	_mode = Mode.MENU
 	_state = null
 	_panel_layer.hide()
+	_help_layer.hide()
 	_touch.hide()
 	# Keyboard / pad users get focus on the first button; on touch screens a focus ring is noise.
 	_menu.open(message, not _prefer_touch)
@@ -438,6 +525,8 @@ func _start_practice() -> void:
 func _restart_practice() -> void:
 	_rules = MatchRules.new()
 	_rules.weapons = true
+	_rules.flurry = true
+	_rules.hazards = true
 	if _smoke == null:
 		var arena := StageDefinition.by_id(GameSettings.arena)
 		if arena != null:
@@ -526,6 +615,8 @@ func _enter_game() -> void:
 	_menu.hide()
 	get_viewport().gui_release_focus() # or Space would press the focused menu button again
 	_panel_layer.hide()
+	if not GameSettings.seen_help and _smoke == null:
+		_open_help() # the first match starts with the how-to-play card
 	_update_touch()
 	if OS.has_feature("web") and TouchControls.handheld():
 		JavaScriptBridge.eval("window.rangbaaziLandscape && window.rangbaaziLandscape.request()")
@@ -609,6 +700,8 @@ func _practice_step() -> void:
 				_end_smoke(false, touch_problem)
 				return
 		_smoke.press_keys(_state, _rules)
+	if _help_layer.visible:
+		return # the first match waits behind the how-to-play card
 	# Both fighters' buttons come from the same pre-advance state, the CPU's included.
 	for p in PLAYERS:
 		_inputs[p] = SparringBot.think(_state, _rules, p, _cpu_level) if p == 1 and _p2_cpu else _local_buttons(p)
@@ -1019,6 +1112,7 @@ func _refresh() -> void:
 	_arena.room_mode = _mode == Mode.ROOM
 	_arena.shake_enabled = GameSettings.effects
 	_arena.show_hitboxes = GameSettings.show_hitboxes
+	_arena.dynamic_camera = GameSettings.follow_camera
 	_chat_button.visible = _mode == Mode.ROOM and _room_session != null \
 		and _room_session.phase == RoomSession.Phase.PLAYING and not _panel_open()
 	# Each set once per refresh: hiding a button, even for an instant, cancels a press in progress.
@@ -1043,6 +1137,14 @@ func _refresh() -> void:
 		var hint := _arena.status_small.duplicate()
 		hint.append("Turn your phone sideways for a bigger view")
 		_arena.status_small = hint
+	# The touch attack button shows the weapon in the local fighter's hand.
+	var mine := 0
+	if _mode == Mode.ROOM and _room_session != null:
+		mine = _room_session.my_fighter
+	elif _mode == Mode.ONLINE and _session != null:
+		mine = int(_session.local_slot)
+	var shown: GameState = _arena.state
+	_touch.weapon = shown.fighters[mine].weapon if shown != null and mine >= 0 and mine < shown.fighters.size() else 0
 	_update_sound()
 	_place_copy_button()
 	_place_again_button()
@@ -1133,7 +1235,8 @@ func _refresh_practice() -> void:
 		tags.append("CPU" if cpu else "YOU" if you else "")
 	_arena.names = names
 	_arena.tags = tags
-	_arena.over_hint = _keys_hint("R / F5 / Restart = play again   Esc = menu")
+	var nick := Nicknames.for_winner(_state)
+	_arena.over_hint = (nick + "   " if nick != "" else "") + _keys_hint("R / F5 / Restart = play again   Esc = menu")
 	var checksum := StateHasher.hex(_state.checksum())
 	if _smoke != null:
 		_arena.debug_text = "SMOKE TEST (bots)   frame %d/%d   checksum %s" % [_state.frame, SceneSmoke.FRAMES, checksum]
@@ -1165,7 +1268,8 @@ func _refresh_room() -> void:
 		_arena.status_big = "Connecting..."
 		_arena.status_small = PackedStringArray(["Room %s" % s.room])
 	elif playing and s.state != null and s.state.match_over:
-		var nick := Nicknames.for_winner(s.state)
+		var winner := s.state.winner_index
+		var nick := Nicknames.for_winner(s.state, s.main_weapons[winner] if winner >= 0 and winner < s.main_weapons.size() else Nicknames.ALL_ROUNDER)
 		_arena.over_hint = "%s   Back to the lobby in a moment..." % nick if nick != "" else "Back to the lobby in a moment..."
 	elif playing and s.my_fighter < 0:
 		_arena.status_small = PackedStringArray(["You're watching: you'll play in the next match."])
@@ -1211,7 +1315,8 @@ func _refresh_online() -> void:
 		if not _prefer_touch:
 			small.append("R / F5 / Play again = play again, Esc = menu")
 	if _phase_is("RUNNING") and state != null and state.match_over:
-		_arena.over_hint = _keys_hint("R / F5 / Play again = play again   Esc = menu")
+		var nick := Nicknames.for_winner(state)
+		_arena.over_hint = (nick + "   " if nick != "" else "") + _keys_hint("R / F5 / Play again = play again   Esc = menu")
 	_arena.status_big = big
 	_arena.status_small = small
 
@@ -1243,6 +1348,8 @@ func _process(_delta: float) -> void:
 func _finish_smoke() -> void:
 	var reference_rules := MatchRules.new()
 	reference_rules.weapons = true
+	reference_rules.flurry = true
+	reference_rules.hazards = true
 	if reference_rules.fingerprint() != _rules.fingerprint():
 		_end_smoke(false, "the practice rules differ from the defaults the reference run uses")
 		return

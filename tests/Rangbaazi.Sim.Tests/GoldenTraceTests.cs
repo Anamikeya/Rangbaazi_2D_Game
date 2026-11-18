@@ -39,7 +39,7 @@ public class GoldenTraceTests
     /// <summary>The rules a scenario plays under; room scenarios copy <see cref="MatchRules.Room"/> with a short clock.</summary>
     private static MatchRules RulesFor(Scenario s)
     {
-        if (s.TimeLimit <= 0) return new MatchRules { Stage = Stages.Graybox, Guts = s.Guts, Weapons = s.Weapons, Signatures = s.Signatures };
+        if (s.TimeLimit <= 0) return new MatchRules { Stage = Stages.Graybox, Guts = s.Guts, Weapons = s.Weapons, Flurry = s.Weapons, Signatures = s.Signatures };
         MatchRules room = MatchRules.Room(Stages.Rooftops, 1);
         return new MatchRules
         {
@@ -49,6 +49,8 @@ public class GoldenTraceTests
             RagePercent = room.RagePercent,
             RespawnShield = room.RespawnShield,
             Weapons = s.Weapons,
+            Flurry = s.Weapons,
+            Hazards = true,
             Signatures = s.Signatures,
         };
     }
@@ -64,6 +66,8 @@ public class GoldenTraceTests
         json.Append($"  \"guts\": {(s.Guts ? "true" : "false")},\n");
         json.Append($"  \"stage\": \"{rules.Stage.Id}\",\n  \"time_limit_frames\": {rules.TimeLimitFrames},\n");
         json.Append($"  \"weapons\": {(rules.Weapons ? "true" : "false")},\n");
+        json.Append($"  \"hazards\": {(rules.Hazards ? "true" : "false")},\n");
+        json.Append($"  \"flurry\": {(rules.Flurry ? "true" : "false")},\n");
         json.Append($"  \"signatures\": [{string.Join(", ", (rules.Signatures ?? Array.Empty<WeaponId>()).Select(w => ((int)w).ToString()))}],\n");
         json.Append(s.Bots == null ? "  \"bots\": null,\n" : $"  \"bots\": [{string.Join(", ", s.Bots.Select(b => $"\"{b.ToString().ToLowerInvariant()}\""))}],\n");
         json.Append($"  \"initial\": \"{state.Checksum():X16}\",\n");
@@ -139,6 +143,15 @@ public class GoldenTraceTests
             h.Add(s.BlastZone.MinY.Raw);
             h.Add(s.BlastZone.MaxX.Raw);
             h.Add(s.BlastZone.MaxY.Raw);
+            foreach (Hazard z in s.Hazards)
+            {
+                h.Add((int)z.Kind);
+                h.Add(z.Zone.MinX.Raw);
+                h.Add(z.Zone.MinY.Raw);
+                h.Add(z.Zone.MaxX.Raw);
+                h.Add(z.Zone.MaxY.Raw);
+                h.Add(z.Direction);
+            }
             json.Append($"  \"{s.Id}\": \"{h.Value:X16}\"{(i + 1 < ArenaStages.All.Count ? "," : "")}\n");
         }
         return json.Append("}\n").ToString();

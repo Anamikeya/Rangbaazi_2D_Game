@@ -8,6 +8,11 @@ var platforms: Array[FxRect] = []
 var spawn_x: PackedInt64Array = []
 var spawn_y: PackedInt64Array = []
 var blast_zone: FxRect
+## The arena's hazards (StageDefinition.Hazards): each one's kind (Hazards.LAUNCH, HIT or PUSH), its
+## zone, and the way a pusher carries fighters (+1 right, -1 left). On only when rules.hazards is.
+var hazard_kinds: PackedInt32Array = []
+var hazard_zones: Array[FxRect] = []
+var hazard_dirs: PackedInt32Array = []
 
 static var _graybox: StageDefinition
 
@@ -52,3 +57,9 @@ func add_to(h: StateHasher) -> void:
 		h.add_u64(spawn_y[i])
 	for v in [blast_zone.min_x, blast_zone.min_y, blast_zone.max_x, blast_zone.max_y]:
 		h.add_u64(v)
+	for i in hazard_kinds.size():
+		h.add_int(hazard_kinds[i])
+		var z := hazard_zones[i]
+		for v in [z.min_x, z.min_y, z.max_x, z.max_y]:
+			h.add_u64(v)
+		h.add_int(hazard_dirs[i])

@@ -46,6 +46,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(19, 4), Fix.FromRatio(357, 40), Fix.FromRatio(15, 2), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-15, 2), Fix.FromRatio(119, 20), Fix.FromInt(-5), Fix.FromRatio(32, 5)), // l3
             new FixRect(Fix.FromRatio(-25, 4), Fix.FromRatio(317, 40), Fix.FromRatio(-15, 4), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(-111, 10), Fix.FromRatio(22, 5), Fix.FromRatio(-39, 5), Fix.FromRatio(32, 5)), 1), // hay
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(163, 20), Fix.FromRatio(127, 20), Fix.FromRatio(229, 20), Fix.FromRatio(167, 20)), -1), // mud
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-73, 50), Fix.FromRatio(21, 2), Fix.FromRatio(46, 25), Fix.FromRatio(25, 2)), -1), // vine
         } },
         // Overtime Office (abhishek)
         new StageDefinition { Id = "abhishek", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -65,6 +70,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-321, 40), Fix.FromRatio(357, 40), Fix.FromRatio(-211, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(221, 40), Fix.FromRatio(29, 5), Fix.FromRatio(321, 40), Fix.FromRatio(25, 4)), // l3
             new FixRect(Fix.FromRatio(171, 40), Fix.FromRatio(317, 40), Fix.FromRatio(271, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(347, 40), Fix.FromRatio(17, 4), Fix.FromRatio(479, 40), Fix.FromRatio(25, 4)), -1), // paper
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(-93, 8), Fix.FromRatio(13, 2), Fix.FromRatio(-333, 40), Fix.FromRatio(17, 2)), 1), // lift
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-187, 200), Fix.FromRatio(21, 2), Fix.FromRatio(473, 200), Fix.FromRatio(25, 2)), -1), // sprinkler
         } },
         // Portal Playground (akmal)
         new StageDefinition { Id = "akmal", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -84,6 +94,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-157, 20), Fix.FromRatio(357, 40), Fix.FromRatio(-51, 10), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(107, 20), Fix.FromRatio(113, 20), Fix.FromRatio(157, 20), Fix.FromRatio(61, 10)), // l3
             new FixRect(Fix.FromRatio(41, 10), Fix.FromRatio(317, 40), Fix.FromRatio(33, 5), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(17, 2), Fix.FromRatio(41, 10), Fix.FromRatio(59, 5), Fix.FromRatio(61, 10)), -1), // portal
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-229, 20), Fix.FromRatio(133, 20), Fix.FromRatio(-163, 20), Fix.FromRatio(173, 20)), 1), // phase
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-111, 100), Fix.FromRatio(21, 2), Fix.FromRatio(219, 100), Fix.FromRatio(25, 2)), -1), // gravity
         } },
         // Kitchen Clash (akshat)
         new StageDefinition { Id = "akshat", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -103,6 +118,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-157, 20), Fix.FromRatio(357, 40), Fix.FromRatio(-51, 10), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(107, 20), Fix.FromRatio(47, 8), Fix.FromRatio(157, 20), Fix.FromRatio(253, 40)), // l3
             new FixRect(Fix.FromRatio(41, 10), Fix.FromRatio(317, 40), Fix.FromRatio(33, 5), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(17, 2), Fix.FromRatio(173, 40), Fix.FromRatio(59, 5), Fix.FromRatio(253, 40)), -1), // oil
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-229, 20), Fix.FromRatio(257, 40), Fix.FromRatio(-163, 20), Fix.FromRatio(337, 40)), 1), // burner
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(-111, 100), Fix.FromRatio(21, 2), Fix.FromRatio(219, 100), Fix.FromRatio(25, 2)), -1), // steam
         } },
         // Blast Quarry (aman)
         new StageDefinition { Id = "aman", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -122,6 +142,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-143, 20), Fix.FromRatio(357, 40), Fix.FromRatio(-22, 5), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(93, 20), Fix.FromRatio(113, 20), Fix.FromRatio(143, 20), Fix.FromRatio(61, 10)), // l3
             new FixRect(Fix.FromRatio(17, 5), Fix.FromRatio(317, 40), Fix.FromRatio(59, 10), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(39, 5), Fix.FromRatio(41, 10), Fix.FromRatio(111, 10), Fix.FromRatio(61, 10)), -1), // gravity
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-43, 4), Fix.FromRatio(133, 20), Fix.FromRatio(-149, 20), Fix.FromRatio(173, 20)), 1), // rubble
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-181, 100), Fix.FromRatio(21, 2), Fix.FromRatio(149, 100), Fix.FromRatio(25, 2)), 1), // crack
         } },
         // Toybox Trouble (ankit)
         new StageDefinition { Id = "ankit", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -141,6 +166,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-279, 40), Fix.FromRatio(357, 40), Fix.FromRatio(-169, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(179, 40), Fix.FromRatio(29, 5), Fix.FromRatio(279, 40), Fix.FromRatio(25, 4)), // l3
             new FixRect(Fix.FromRatio(129, 40), Fix.FromRatio(317, 40), Fix.FromRatio(229, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(61, 8), Fix.FromRatio(17, 4), Fix.FromRatio(437, 40), Fix.FromRatio(25, 4)), -1), // spring
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(-423, 40), Fix.FromRatio(13, 2), Fix.FromRatio(-291, 40), Fix.FromRatio(17, 2)), 1), // seesaw
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-397, 200), Fix.FromRatio(21, 2), Fix.FromRatio(263, 200), Fix.FromRatio(25, 2)), 1), // decoy
         } },
         // Sightline City (artha)
         new StageDefinition { Id = "artha", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -160,6 +190,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(197, 40), Fix.FromRatio(357, 40), Fix.FromRatio(307, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-307, 40), Fix.FromRatio(47, 8), Fix.FromRatio(-207, 40), Fix.FromRatio(253, 40)), // l3
             new FixRect(Fix.FromRatio(-257, 40), Fix.FromRatio(317, 40), Fix.FromRatio(-157, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-451, 40), Fix.FromRatio(173, 40), Fix.FromRatio(-319, 40), Fix.FromRatio(253, 40)), 1), // sightline
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(333, 40), Fix.FromRatio(257, 40), Fix.FromRatio(93, 8), Fix.FromRatio(337, 40)), -1), // glass
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-327, 200), Fix.FromRatio(21, 2), Fix.FromRatio(333, 200), Fix.FromRatio(25, 2)), -1), // conveyor
         } },
         // World Duel Dome (avipray)
         new StageDefinition { Id = "avipray", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -179,6 +214,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(211, 40), Fix.FromRatio(357, 40), Fix.FromRatio(321, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-321, 40), Fix.FromRatio(113, 20), Fix.FromRatio(-221, 40), Fix.FromRatio(61, 10)), // l3
             new FixRect(Fix.FromRatio(-271, 40), Fix.FromRatio(317, 40), Fix.FromRatio(-171, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-93, 8), Fix.FromRatio(41, 10), Fix.FromRatio(-333, 40), Fix.FromRatio(61, 10)), 1), // shield
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(347, 40), Fix.FromRatio(133, 20), Fix.FromRatio(479, 40), Fix.FromRatio(173, 20)), -1), // shutter
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-397, 200), Fix.FromRatio(21, 2), Fix.FromRatio(263, 200), Fix.FromRatio(25, 2)), 1), // gust
         } },
         // Jugaad Garage (ayush)
         new StageDefinition { Id = "ayush", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -198,6 +238,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(169, 40), Fix.FromRatio(357, 40), Fix.FromRatio(279, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-279, 40), Fix.FromRatio(47, 8), Fix.FromRatio(-179, 40), Fix.FromRatio(253, 40)), // l3
             new FixRect(Fix.FromRatio(-229, 40), Fix.FromRatio(317, 40), Fix.FromRatio(-129, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-423, 40), Fix.FromRatio(173, 40), Fix.FromRatio(-291, 40), Fix.FromRatio(253, 40)), 1), // magnet
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(61, 8), Fix.FromRatio(257, 40), Fix.FromRatio(437, 40), Fix.FromRatio(337, 40)), -1), // crusher
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-187, 200), Fix.FromRatio(21, 2), Fix.FromRatio(473, 200), Fix.FromRatio(25, 2)), -1), // oil
         } },
         // Slimeworks (chandan)
         new StageDefinition { Id = "chandan", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -217,6 +262,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-307, 40), Fix.FromRatio(357, 40), Fix.FromRatio(-197, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(207, 40), Fix.FromRatio(229, 40), Fix.FromRatio(307, 40), Fix.FromRatio(247, 40)), // l3
             new FixRect(Fix.FromRatio(157, 40), Fix.FromRatio(317, 40), Fix.FromRatio(257, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(333, 40), Fix.FromRatio(167, 40), Fix.FromRatio(93, 8), Fix.FromRatio(247, 40)), -1), // slime
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-451, 40), Fix.FromRatio(263, 40), Fix.FromRatio(-319, 40), Fix.FromRatio(343, 40)), 1), // drain
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-257, 200), Fix.FromRatio(21, 2), Fix.FromRatio(403, 200), Fix.FromRatio(25, 2)), -1), // conveyor
         } },
         // Dockside Dash (devanshu)
         new StageDefinition { Id = "devanshu", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -236,6 +286,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-293, 40), Fix.FromRatio(357, 40), Fix.FromRatio(-183, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(193, 40), Fix.FromRatio(47, 8), Fix.FromRatio(293, 40), Fix.FromRatio(253, 40)), // l3
             new FixRect(Fix.FromRatio(143, 40), Fix.FromRatio(317, 40), Fix.FromRatio(243, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(319, 40), Fix.FromRatio(173, 40), Fix.FromRatio(451, 40), Fix.FromRatio(253, 40)), -1), // tide
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(-437, 40), Fix.FromRatio(257, 40), Fix.FromRatio(-61, 8), Fix.FromRatio(337, 40)), 1), // lift
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-327, 200), Fix.FromRatio(21, 2), Fix.FromRatio(333, 200), Fix.FromRatio(25, 2)), -1), // water
         } },
         // Tracking Yard (faiz)
         new StageDefinition { Id = "faiz", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -255,6 +310,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-321, 40), Fix.FromRatio(357, 40), Fix.FromRatio(-211, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(221, 40), Fix.FromRatio(47, 8), Fix.FromRatio(321, 40), Fix.FromRatio(253, 40)), // l3
             new FixRect(Fix.FromRatio(171, 40), Fix.FromRatio(317, 40), Fix.FromRatio(271, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(347, 40), Fix.FromRatio(173, 40), Fix.FromRatio(479, 40), Fix.FromRatio(253, 40)), -1), // magnet
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-93, 8), Fix.FromRatio(257, 40), Fix.FromRatio(-333, 40), Fix.FromRatio(337, 40)), 1), // mine
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-187, 200), Fix.FromRatio(21, 2), Fix.FromRatio(473, 200), Fix.FromRatio(25, 2)), -1), // sightline
         } },
         // Neon Greenhouse (faizal)
         new StageDefinition { Id = "faizal", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -274,6 +334,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(51, 10), Fix.FromRatio(357, 40), Fix.FromRatio(157, 20), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-157, 20), Fix.FromRatio(29, 5), Fix.FromRatio(-107, 20), Fix.FromRatio(25, 4)), // l3
             new FixRect(Fix.FromRatio(-33, 5), Fix.FromRatio(317, 40), Fix.FromRatio(-41, 10), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-229, 20), Fix.FromRatio(17, 4), Fix.FromRatio(-163, 20), Fix.FromRatio(25, 4)), 1), // spore
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(17, 2), Fix.FromRatio(13, 2), Fix.FromRatio(59, 5), Fix.FromRatio(17, 2)), -1), // glass
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-181, 100), Fix.FromRatio(21, 2), Fix.FromRatio(149, 100), Fix.FromRatio(25, 2)), 1), // gust
         } },
         // Laughing Ring (harsh)
         new StageDefinition { Id = "harsh", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -293,6 +358,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(211, 40), Fix.FromRatio(357, 40), Fix.FromRatio(321, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-321, 40), Fix.FromRatio(229, 40), Fix.FromRatio(-221, 40), Fix.FromRatio(247, 40)), // l3
             new FixRect(Fix.FromRatio(-271, 40), Fix.FromRatio(317, 40), Fix.FromRatio(-171, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-93, 8), Fix.FromRatio(167, 40), Fix.FromRatio(-333, 40), Fix.FromRatio(247, 40)), 1), // banana
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(347, 40), Fix.FromRatio(263, 40), Fix.FromRatio(479, 40), Fix.FromRatio(343, 40)), -1), // swing
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(-397, 200), Fix.FromRatio(21, 2), Fix.FromRatio(263, 200), Fix.FromRatio(25, 2)), 1), // spring
         } },
         // Rangbaazi Grand Finale (maaz)
         new StageDefinition { Id = "maaz", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -312,6 +382,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(197, 40), Fix.FromRatio(357, 40), Fix.FromRatio(307, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-307, 40), Fix.FromRatio(119, 20), Fix.FromRatio(-207, 40), Fix.FromRatio(32, 5)), // l3
             new FixRect(Fix.FromRatio(-257, 40), Fix.FromRatio(317, 40), Fix.FromRatio(-157, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-451, 40), Fix.FromRatio(22, 5), Fix.FromRatio(-319, 40), Fix.FromRatio(32, 5)), 1), // oil
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(333, 40), Fix.FromRatio(127, 20), Fix.FromRatio(93, 8), Fix.FromRatio(167, 20)), -1), // water
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-327, 200), Fix.FromRatio(21, 2), Fix.FromRatio(333, 200), Fix.FromRatio(25, 2)), -1), // reactor
         } },
         // Skyline Soundstage (manish)
         new StageDefinition { Id = "manish", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -331,6 +406,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(22, 5), Fix.FromRatio(357, 40), Fix.FromRatio(143, 20), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-143, 20), Fix.FromRatio(47, 8), Fix.FromRatio(-93, 20), Fix.FromRatio(253, 40)), // l3
             new FixRect(Fix.FromRatio(-59, 10), Fix.FromRatio(317, 40), Fix.FromRatio(-17, 5), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-43, 4), Fix.FromRatio(173, 40), Fix.FromRatio(-149, 20), Fix.FromRatio(253, 40)), 1), // speaker
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(39, 5), Fix.FromRatio(257, 40), Fix.FromRatio(111, 10), Fix.FromRatio(337, 40)), -1), // beatPad
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-111, 100), Fix.FromRatio(21, 2), Fix.FromRatio(219, 100), Fix.FromRatio(25, 2)), -1), // coil
         } },
         // Blade Circuit (nikhil)
         new StageDefinition { Id = "nikhil", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -350,6 +430,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-279, 40), Fix.FromRatio(357, 40), Fix.FromRatio(-169, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(179, 40), Fix.FromRatio(229, 40), Fix.FromRatio(279, 40), Fix.FromRatio(247, 40)), // l3
             new FixRect(Fix.FromRatio(129, 40), Fix.FromRatio(317, 40), Fix.FromRatio(229, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(61, 8), Fix.FromRatio(167, 40), Fix.FromRatio(437, 40), Fix.FromRatio(247, 40)), -1), // laser
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-423, 40), Fix.FromRatio(263, 40), Fix.FromRatio(-291, 40), Fix.FromRatio(343, 40)), 1), // shutter
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-397, 200), Fix.FromRatio(21, 2), Fix.FromRatio(263, 200), Fix.FromRatio(25, 2)), 1), // vine
         } },
         // Sports Rooftops (rajat)
         new StageDefinition { Id = "rajat", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -369,6 +454,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-307, 40), Fix.FromRatio(357, 40), Fix.FromRatio(-197, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(207, 40), Fix.FromRatio(113, 20), Fix.FromRatio(307, 40), Fix.FromRatio(61, 10)), // l3
             new FixRect(Fix.FromRatio(157, 40), Fix.FromRatio(317, 40), Fix.FromRatio(257, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(333, 40), Fix.FromRatio(41, 10), Fix.FromRatio(93, 8), Fix.FromRatio(61, 10)), -1), // gust
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-451, 40), Fix.FromRatio(133, 20), Fix.FromRatio(-319, 40), Fix.FromRatio(173, 20)), 1), // mirror
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(-257, 200), Fix.FromRatio(21, 2), Fix.FromRatio(403, 200), Fix.FromRatio(25, 2)), -1), // bounce
         } },
         // Gadget Laboratory (rishabh)
         new StageDefinition { Id = "rishabh", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -388,6 +478,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(19, 4), Fix.FromRatio(357, 40), Fix.FromRatio(15, 2), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-15, 2), Fix.FromRatio(113, 20), Fix.FromInt(-5), Fix.FromRatio(61, 10)), // l3
             new FixRect(Fix.FromRatio(-25, 4), Fix.FromRatio(317, 40), Fix.FromRatio(-15, 4), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-111, 10), Fix.FromRatio(41, 10), Fix.FromRatio(-39, 5), Fix.FromRatio(61, 10)), 1), // reactor
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(163, 20), Fix.FromRatio(133, 20), Fix.FromRatio(229, 20), Fix.FromRatio(173, 20)), -1), // coil
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-73, 50), Fix.FromRatio(21, 2), Fix.FromRatio(46, 25), Fix.FromRatio(25, 2)), -1), // laser
         } },
         // Tiffin Terminal (saklan)
         new StageDefinition { Id = "saklan", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -407,6 +502,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-143, 20), Fix.FromRatio(357, 40), Fix.FromRatio(-22, 5), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(93, 20), Fix.FromRatio(119, 20), Fix.FromRatio(143, 20), Fix.FromRatio(32, 5)), // l3
             new FixRect(Fix.FromRatio(17, 5), Fix.FromRatio(317, 40), Fix.FromRatio(59, 10), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(39, 5), Fix.FromRatio(22, 5), Fix.FromRatio(111, 10), Fix.FromRatio(32, 5)), -1), // conveyor
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-43, 4), Fix.FromRatio(127, 20), Fix.FromRatio(-149, 20), Fix.FromRatio(167, 20)), 1), // alarm
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(-181, 100), Fix.FromRatio(21, 2), Fix.FromRatio(149, 100), Fix.FromRatio(25, 2)), 1), // steam
         } },
         // Action Backlot (salik)
         new StageDefinition { Id = "salik", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -426,6 +526,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(183, 40), Fix.FromRatio(357, 40), Fix.FromRatio(293, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-293, 40), Fix.FromRatio(229, 40), Fix.FromRatio(-193, 40), Fix.FromRatio(247, 40)), // l3
             new FixRect(Fix.FromRatio(-243, 40), Fix.FromRatio(317, 40), Fix.FromRatio(-143, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-437, 40), Fix.FromRatio(167, 40), Fix.FromRatio(-61, 8), Fix.FromRatio(247, 40)), 1), // paper
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(319, 40), Fix.FromRatio(263, 40), Fix.FromRatio(451, 40), Fix.FromRatio(343, 40)), -1), // burner
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-257, 200), Fix.FromRatio(21, 2), Fix.FromRatio(403, 200), Fix.FromRatio(25, 2)), -1), // alarm
         } },
         // Scrapyard Showdown (sarthak)
         new StageDefinition { Id = "sarthak", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -445,6 +550,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-15, 2), Fix.FromRatio(357, 40), Fix.FromRatio(-19, 4), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromInt(5), Fix.FromRatio(29, 5), Fix.FromRatio(15, 2), Fix.FromRatio(25, 4)), // l3
             new FixRect(Fix.FromRatio(15, 4), Fix.FromRatio(317, 40), Fix.FromRatio(25, 4), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(163, 20), Fix.FromRatio(17, 4), Fix.FromRatio(229, 20), Fix.FromRatio(25, 4)), -1), // crusher
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-111, 10), Fix.FromRatio(13, 2), Fix.FromRatio(-39, 5), Fix.FromRatio(17, 2)), 1), // magnet
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-73, 50), Fix.FromRatio(21, 2), Fix.FromRatio(46, 25), Fix.FromRatio(25, 2)), -1), // rubble
         } },
         // Rookie Rooftops (shahn)
         new StageDefinition { Id = "rooftops", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -464,6 +574,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(211, 40), Fix.FromRatio(357, 40), Fix.FromRatio(321, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-321, 40), Fix.FromRatio(119, 20), Fix.FromRatio(-221, 40), Fix.FromRatio(32, 5)), // l3
             new FixRect(Fix.FromRatio(-271, 40), Fix.FromRatio(317, 40), Fix.FromRatio(-171, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(-93, 8), Fix.FromRatio(22, 5), Fix.FromRatio(-333, 40), Fix.FromRatio(32, 5)), 1), // spring
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(347, 40), Fix.FromRatio(127, 20), Fix.FromRatio(479, 40), Fix.FromRatio(167, 20)), -1), // shutter
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-397, 200), Fix.FromRatio(21, 2), Fix.FromRatio(263, 200), Fix.FromRatio(25, 2)), 1), // crate
         } },
         // Mohalla Mayhem (shraddha)
         new StageDefinition { Id = "shraddha", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -483,6 +598,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-15, 2), Fix.FromRatio(357, 40), Fix.FromRatio(-19, 4), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromInt(5), Fix.FromRatio(229, 40), Fix.FromRatio(15, 2), Fix.FromRatio(247, 40)), // l3
             new FixRect(Fix.FromRatio(15, 4), Fix.FromRatio(317, 40), Fix.FromRatio(25, 4), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(163, 20), Fix.FromRatio(167, 40), Fix.FromRatio(229, 20), Fix.FromRatio(247, 40)), -1), // gravity
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-111, 10), Fix.FromRatio(263, 40), Fix.FromRatio(-39, 5), Fix.FromRatio(343, 40)), 1), // gust
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(-73, 50), Fix.FromRatio(21, 2), Fix.FromRatio(46, 25), Fix.FromRatio(25, 2)), -1), // spring
         } },
         // Gully Stadium (shubham)
         new StageDefinition { Id = "shubham", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -502,6 +622,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(51, 10), Fix.FromRatio(357, 40), Fix.FromRatio(157, 20), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-157, 20), Fix.FromRatio(229, 40), Fix.FromRatio(-107, 20), Fix.FromRatio(247, 40)), // l3
             new FixRect(Fix.FromRatio(-33, 5), Fix.FromRatio(317, 40), Fix.FromRatio(-41, 10), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(-229, 20), Fix.FromRatio(167, 40), Fix.FromRatio(-163, 20), Fix.FromRatio(247, 40)), 1), // launcher
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(17, 2), Fix.FromRatio(263, 40), Fix.FromRatio(59, 5), Fix.FromRatio(343, 40)), -1), // bounce
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-181, 100), Fix.FromRatio(21, 2), Fix.FromRatio(149, 100), Fix.FromRatio(25, 2)), 1), // glass
         } },
         // Steel Courtyard (simran)
         new StageDefinition { Id = "simran", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -521,6 +646,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(197, 40), Fix.FromRatio(357, 40), Fix.FromRatio(307, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-307, 40), Fix.FromRatio(29, 5), Fix.FromRatio(-207, 40), Fix.FromRatio(25, 4)), // l3
             new FixRect(Fix.FromRatio(-257, 40), Fix.FromRatio(317, 40), Fix.FromRatio(-157, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-451, 40), Fix.FromRatio(17, 4), Fix.FromRatio(-319, 40), Fix.FromRatio(25, 4)), 1), // mirror
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(333, 40), Fix.FromRatio(13, 2), Fix.FromRatio(93, 8), Fix.FromRatio(17, 2)), -1), // bell
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-327, 200), Fix.FromRatio(21, 2), Fix.FromRatio(333, 200), Fix.FromRatio(25, 2)), -1), // shutter
         } },
         // Akhara Arena (siraj)
         new StageDefinition { Id = "siraj", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -540,6 +670,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(22, 5), Fix.FromRatio(357, 40), Fix.FromRatio(143, 20), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-143, 20), Fix.FromRatio(29, 5), Fix.FromRatio(-93, 20), Fix.FromRatio(25, 4)), // l3
             new FixRect(Fix.FromRatio(-59, 10), Fix.FromRatio(317, 40), Fix.FromRatio(-17, 5), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(-43, 4), Fix.FromRatio(17, 4), Fix.FromRatio(-149, 20), Fix.FromRatio(25, 4)), 1), // crack
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(39, 5), Fix.FromRatio(13, 2), Fix.FromRatio(111, 10), Fix.FromRatio(17, 2)), -1), // pillar
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-111, 100), Fix.FromRatio(21, 2), Fix.FromRatio(219, 100), Fix.FromRatio(25, 2)), -1), // mud
         } },
         // Archer's Ascent (suhani)
         new StageDefinition { Id = "suhani", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -559,6 +694,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-157, 20), Fix.FromRatio(357, 40), Fix.FromRatio(-51, 10), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(107, 20), Fix.FromRatio(119, 20), Fix.FromRatio(157, 20), Fix.FromRatio(32, 5)), // l3
             new FixRect(Fix.FromRatio(41, 10), Fix.FromRatio(317, 40), Fix.FromRatio(33, 5), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(17, 2), Fix.FromRatio(22, 5), Fix.FromRatio(59, 5), Fix.FromRatio(32, 5)), -1), // vine
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(-229, 20), Fix.FromRatio(127, 20), Fix.FromRatio(-163, 20), Fix.FromRatio(167, 20)), 1), // bridge
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-111, 100), Fix.FromRatio(21, 2), Fix.FromRatio(219, 100), Fix.FromRatio(25, 2)), -1), // gust
         } },
         // Frost Factory (tushar)
         new StageDefinition { Id = "tushar", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -578,6 +718,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(169, 40), Fix.FromRatio(357, 40), Fix.FromRatio(279, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-279, 40), Fix.FromRatio(119, 20), Fix.FromRatio(-179, 40), Fix.FromRatio(32, 5)), // l3
             new FixRect(Fix.FromRatio(-229, 40), Fix.FromRatio(317, 40), Fix.FromRatio(-129, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-423, 40), Fix.FromRatio(22, 5), Fix.FromRatio(-291, 40), Fix.FromRatio(32, 5)), 1), // ice
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(61, 8), Fix.FromRatio(127, 20), Fix.FromRatio(437, 40), Fix.FromRatio(167, 20)), -1), // steam
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-187, 200), Fix.FromRatio(21, 2), Fix.FromRatio(473, 200), Fix.FromRatio(25, 2)), -1), // conveyor
         } },
         // Colour Carnival (unnati)
         new StageDefinition { Id = "unnati", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -597,6 +742,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(-293, 40), Fix.FromRatio(357, 40), Fix.FromRatio(-183, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(193, 40), Fix.FromRatio(119, 20), Fix.FromRatio(293, 40), Fix.FromRatio(32, 5)), // l3
             new FixRect(Fix.FromRatio(143, 40), Fix.FromRatio(317, 40), Fix.FromRatio(243, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(319, 40), Fix.FromRatio(22, 5), Fix.FromRatio(451, 40), Fix.FromRatio(32, 5)), -1), // paint
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-437, 40), Fix.FromRatio(127, 20), Fix.FromRatio(-61, 8), Fix.FromRatio(167, 20)), 1), // sprinkler
+            new Hazard(HazardKind.Launch, new FixRect(Fix.FromRatio(-327, 200), Fix.FromRatio(21, 2), Fix.FromRatio(333, 200), Fix.FromRatio(25, 2)), -1), // bounce
         } },
         // Water-Tank Terrace (vinayak)
         new StageDefinition { Id = "vinayak", SpawnPoints = Spawns, BlastZone = Blast, Platforms = new[]
@@ -616,6 +766,11 @@ public static class ArenaStages
             new FixRect(Fix.FromRatio(183, 40), Fix.FromRatio(357, 40), Fix.FromRatio(293, 40), Fix.FromRatio(75, 8)), // r5
             new FixRect(Fix.FromRatio(-293, 40), Fix.FromRatio(113, 20), Fix.FromRatio(-193, 40), Fix.FromRatio(61, 10)), // l3
             new FixRect(Fix.FromRatio(-243, 40), Fix.FromRatio(317, 40), Fix.FromRatio(-143, 40), Fix.FromRatio(67, 8)), // l4
+        }, Hazards = new[]
+        {
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-437, 40), Fix.FromRatio(41, 10), Fix.FromRatio(-61, 8), Fix.FromRatio(61, 10)), 1), // water
+            new Hazard(HazardKind.Hit, new FixRect(Fix.FromRatio(319, 40), Fix.FromRatio(133, 20), Fix.FromRatio(451, 40), Fix.FromRatio(173, 20)), -1), // coil
+            new Hazard(HazardKind.Push, new FixRect(Fix.FromRatio(-257, 200), Fix.FromRatio(21, 2), Fix.FromRatio(403, 200), Fix.FromRatio(25, 2)), -1), // drain
         } },
     };
 

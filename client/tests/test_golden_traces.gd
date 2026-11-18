@@ -19,6 +19,8 @@ func _replay(file_name: String) -> void:
 		rules.time_limit_frames = time_limit
 	rules.guts = g["guts"]
 	rules.weapons = bool(g.get("weapons", false))
+	rules.flurry = bool(g.get("flurry", false))
+	rules.hazards = bool(g.get("hazards", false))
 	var sigs := PackedInt32Array()
 	for w in g.get("signatures", []):
 		sigs.append(int(w))

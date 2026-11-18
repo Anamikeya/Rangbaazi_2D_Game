@@ -67,6 +67,7 @@ public class GameStateCodecTests
                 Type t when t == typeof(SimRandom) => new SimRandom(0xDEADBEEF),
                 Type t when t == typeof(Fighter[]) => ChangedFighters(state),
                 Type t when t == typeof(Prop[]) => ChangedProps(state),
+                Type t when t == typeof(int[]) => ((int[])field.GetValue(state)!).Select((v, i) => v + i + 1).ToArray(),
                 Type t when t == typeof(WeaponId) => WeaponId.Bow,
                 _ => throw new InvalidOperationException($"GameState.{field.Name} ({field.FieldType.Name}) has no case in this test; add it here and to GameStateCodec."),
             };
@@ -76,6 +77,7 @@ public class GameStateCodecTests
             object? expected = field.GetValue(state), actual = field.GetValue(loaded);
             if (expected is Fighter[] a) Assert.Equal(a, (Fighter[])actual!);
             else if (expected is Prop[] p) Assert.Equal(p, (Prop[])actual!);
+            else if (expected is int[] n) Assert.Equal(n, (int[])actual!);
             else Assert.Equal(expected, actual);
         }
     }

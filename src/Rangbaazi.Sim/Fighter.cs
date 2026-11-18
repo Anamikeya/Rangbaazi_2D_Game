@@ -93,6 +93,18 @@ public struct Fighter
     public int UziStreak;
     public int UziTarget;   // 1 + the fighter the streak is on, or 0
 
+    /// <summary>
+    /// The last hit this fighter took: the weapon it came from (None for fists and hazards) and
+    /// whether it was a sweet spot. HitCount goes up on every hit, so a renderer can tell a new
+    /// hit from the last one. Also used to credit a KO to the weapon that caused it.
+    /// </summary>
+    public WeaponId LastHitWeapon;
+    public bool LastHitSweet;
+    public int HitCount;
+
+    /// <summary>The second hit of a fist flurry, queued to start when the first one ends; or None.</summary>
+    public MoveId FlurryNext;
+
     public readonly bool IsActive => Action != FighterAction.Respawning && Action != FighterAction.Eliminated;
 
     internal readonly void AddTo(ref StateHasher h)
@@ -130,5 +142,9 @@ public struct Fighter
         h.Add(UziShots);
         h.Add(UziStreak);
         h.Add(UziTarget);
+        h.Add((int)FlurryNext);
+        h.Add((int)LastHitWeapon);
+        h.Add(LastHitSweet);
+        h.Add(HitCount);
     }
 }

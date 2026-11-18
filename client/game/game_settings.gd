@@ -14,8 +14,12 @@ static var arena := "rooftops"
 static var max_fps := 60
 ## Effects: shake on a hit you take. Off is calmer and a little cheaper.
 static var effects := true
-static var show_hitboxes := true
+static var show_hitboxes := false
 static var show_debug := false
+## The camera follows the fight (zooming in on it); off, the whole arena is always shown.
+static var follow_camera := true
+## The how-to-play card has been shown once.
+static var seen_help := false
 ## Volumes, 0 to 1: the music and ambience, and everything else.
 static var music_volume := 0.7
 static var effects_volume := 0.9
@@ -37,7 +41,9 @@ static func load_settings() -> void:
 	if not FPS_CHOICES.has(max_fps):
 		max_fps = 60
 	effects = bool(cfg.get_value("graphics", "effects", true))
-	show_hitboxes = bool(cfg.get_value("graphics", "show_hitboxes", true))
+	show_hitboxes = bool(cfg.get_value("graphics", "show_hitboxes", false))
+	follow_camera = bool(cfg.get_value("graphics", "follow_camera", true))
+	seen_help = bool(cfg.get_value("player", "seen_help", false))
 	show_debug = bool(cfg.get_value("graphics", "show_debug", false))
 	music_volume = clampf(float(cfg.get_value("sound", "music", 0.7)), 0.0, 1.0)
 	effects_volume = clampf(float(cfg.get_value("sound", "effects", 0.9)), 0.0, 1.0)
@@ -51,6 +57,8 @@ static func save() -> void:
 	cfg.set_value("graphics", "max_fps", max_fps)
 	cfg.set_value("graphics", "effects", effects)
 	cfg.set_value("graphics", "show_hitboxes", show_hitboxes)
+	cfg.set_value("graphics", "follow_camera", follow_camera)
+	cfg.set_value("player", "seen_help", seen_help)
 	cfg.set_value("graphics", "show_debug", show_debug)
 	cfg.set_value("sound", "music", music_volume)
 	cfg.set_value("sound", "effects", effects_volume)

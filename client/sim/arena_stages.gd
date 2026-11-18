@@ -45,6 +45,8 @@ static func by_id(stage_id: String) -> StageDefinition:
 	if _cache.has(stage_id):
 		return _cache[stage_id]
 	var platforms: Array[FxRect] = []
+	# Hazards: [kind (Hazards.LAUNCH, HIT or PUSH), zone, direction] each.
+	var hazards: Array = []
 	match stage_id:
 		"abbas": # Farmyard Frenzy
 			platforms = [
@@ -64,6 +66,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-15, 2), Fx.ratio(119, 20), Fx.from_int(-5), Fx.ratio(32, 5)), # l3
 				FxRect.new(Fx.ratio(-25, 4), Fx.ratio(317, 40), Fx.ratio(-15, 4), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[0, FxRect.new(Fx.ratio(-111, 10), Fx.ratio(22, 5), Fx.ratio(-39, 5), Fx.ratio(32, 5)), 1], # hay
+				[2, FxRect.new(Fx.ratio(163, 20), Fx.ratio(127, 20), Fx.ratio(229, 20), Fx.ratio(167, 20)), -1], # mud
+				[2, FxRect.new(Fx.ratio(-73, 50), Fx.ratio(21, 2), Fx.ratio(46, 25), Fx.ratio(25, 2)), -1], # vine
+			]
 		"abhishek": # Overtime Office
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -81,6 +88,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-321, 40), Fx.ratio(357, 40), Fx.ratio(-211, 40), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.ratio(221, 40), Fx.ratio(29, 5), Fx.ratio(321, 40), Fx.ratio(25, 4)), # l3
 				FxRect.new(Fx.ratio(171, 40), Fx.ratio(317, 40), Fx.ratio(271, 40), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(347, 40), Fx.ratio(17, 4), Fx.ratio(479, 40), Fx.ratio(25, 4)), -1], # paper
+				[0, FxRect.new(Fx.ratio(-93, 8), Fx.ratio(13, 2), Fx.ratio(-333, 40), Fx.ratio(17, 2)), 1], # lift
+				[2, FxRect.new(Fx.ratio(-187, 200), Fx.ratio(21, 2), Fx.ratio(473, 200), Fx.ratio(25, 2)), -1], # sprinkler
 			]
 		"akmal": # Portal Playground
 			platforms = [
@@ -100,6 +112,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(107, 20), Fx.ratio(113, 20), Fx.ratio(157, 20), Fx.ratio(61, 10)), # l3
 				FxRect.new(Fx.ratio(41, 10), Fx.ratio(317, 40), Fx.ratio(33, 5), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[0, FxRect.new(Fx.ratio(17, 2), Fx.ratio(41, 10), Fx.ratio(59, 5), Fx.ratio(61, 10)), -1], # portal
+				[1, FxRect.new(Fx.ratio(-229, 20), Fx.ratio(133, 20), Fx.ratio(-163, 20), Fx.ratio(173, 20)), 1], # phase
+				[2, FxRect.new(Fx.ratio(-111, 100), Fx.ratio(21, 2), Fx.ratio(219, 100), Fx.ratio(25, 2)), -1], # gravity
+			]
 		"akshat": # Kitchen Clash
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -117,6 +134,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-157, 20), Fx.ratio(357, 40), Fx.ratio(-51, 10), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.ratio(107, 20), Fx.ratio(47, 8), Fx.ratio(157, 20), Fx.ratio(253, 40)), # l3
 				FxRect.new(Fx.ratio(41, 10), Fx.ratio(317, 40), Fx.ratio(33, 5), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(17, 2), Fx.ratio(173, 40), Fx.ratio(59, 5), Fx.ratio(253, 40)), -1], # oil
+				[1, FxRect.new(Fx.ratio(-229, 20), Fx.ratio(257, 40), Fx.ratio(-163, 20), Fx.ratio(337, 40)), 1], # burner
+				[0, FxRect.new(Fx.ratio(-111, 100), Fx.ratio(21, 2), Fx.ratio(219, 100), Fx.ratio(25, 2)), -1], # steam
 			]
 		"aman": # Blast Quarry
 			platforms = [
@@ -136,6 +158,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(93, 20), Fx.ratio(113, 20), Fx.ratio(143, 20), Fx.ratio(61, 10)), # l3
 				FxRect.new(Fx.ratio(17, 5), Fx.ratio(317, 40), Fx.ratio(59, 10), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(39, 5), Fx.ratio(41, 10), Fx.ratio(111, 10), Fx.ratio(61, 10)), -1], # gravity
+				[1, FxRect.new(Fx.ratio(-43, 4), Fx.ratio(133, 20), Fx.ratio(-149, 20), Fx.ratio(173, 20)), 1], # rubble
+				[1, FxRect.new(Fx.ratio(-181, 100), Fx.ratio(21, 2), Fx.ratio(149, 100), Fx.ratio(25, 2)), 1], # crack
+			]
 		"ankit": # Toybox Trouble
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -153,6 +180,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-279, 40), Fx.ratio(357, 40), Fx.ratio(-169, 40), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.ratio(179, 40), Fx.ratio(29, 5), Fx.ratio(279, 40), Fx.ratio(25, 4)), # l3
 				FxRect.new(Fx.ratio(129, 40), Fx.ratio(317, 40), Fx.ratio(229, 40), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[0, FxRect.new(Fx.ratio(61, 8), Fx.ratio(17, 4), Fx.ratio(437, 40), Fx.ratio(25, 4)), -1], # spring
+				[0, FxRect.new(Fx.ratio(-423, 40), Fx.ratio(13, 2), Fx.ratio(-291, 40), Fx.ratio(17, 2)), 1], # seesaw
+				[1, FxRect.new(Fx.ratio(-397, 200), Fx.ratio(21, 2), Fx.ratio(263, 200), Fx.ratio(25, 2)), 1], # decoy
 			]
 		"artha": # Sightline City
 			platforms = [
@@ -172,6 +204,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-307, 40), Fx.ratio(47, 8), Fx.ratio(-207, 40), Fx.ratio(253, 40)), # l3
 				FxRect.new(Fx.ratio(-257, 40), Fx.ratio(317, 40), Fx.ratio(-157, 40), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[1, FxRect.new(Fx.ratio(-451, 40), Fx.ratio(173, 40), Fx.ratio(-319, 40), Fx.ratio(253, 40)), 1], # sightline
+				[1, FxRect.new(Fx.ratio(333, 40), Fx.ratio(257, 40), Fx.ratio(93, 8), Fx.ratio(337, 40)), -1], # glass
+				[2, FxRect.new(Fx.ratio(-327, 200), Fx.ratio(21, 2), Fx.ratio(333, 200), Fx.ratio(25, 2)), -1], # conveyor
+			]
 		"avipray": # World Duel Dome
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -189,6 +226,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(211, 40), Fx.ratio(357, 40), Fx.ratio(321, 40), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.ratio(-321, 40), Fx.ratio(113, 20), Fx.ratio(-221, 40), Fx.ratio(61, 10)), # l3
 				FxRect.new(Fx.ratio(-271, 40), Fx.ratio(317, 40), Fx.ratio(-171, 40), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[1, FxRect.new(Fx.ratio(-93, 8), Fx.ratio(41, 10), Fx.ratio(-333, 40), Fx.ratio(61, 10)), 1], # shield
+				[1, FxRect.new(Fx.ratio(347, 40), Fx.ratio(133, 20), Fx.ratio(479, 40), Fx.ratio(173, 20)), -1], # shutter
+				[2, FxRect.new(Fx.ratio(-397, 200), Fx.ratio(21, 2), Fx.ratio(263, 200), Fx.ratio(25, 2)), 1], # gust
 			]
 		"ayush": # Jugaad Garage
 			platforms = [
@@ -208,6 +250,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-279, 40), Fx.ratio(47, 8), Fx.ratio(-179, 40), Fx.ratio(253, 40)), # l3
 				FxRect.new(Fx.ratio(-229, 40), Fx.ratio(317, 40), Fx.ratio(-129, 40), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(-423, 40), Fx.ratio(173, 40), Fx.ratio(-291, 40), Fx.ratio(253, 40)), 1], # magnet
+				[1, FxRect.new(Fx.ratio(61, 8), Fx.ratio(257, 40), Fx.ratio(437, 40), Fx.ratio(337, 40)), -1], # crusher
+				[2, FxRect.new(Fx.ratio(-187, 200), Fx.ratio(21, 2), Fx.ratio(473, 200), Fx.ratio(25, 2)), -1], # oil
+			]
 		"chandan": # Slimeworks
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -225,6 +272,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-307, 40), Fx.ratio(357, 40), Fx.ratio(-197, 40), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.ratio(207, 40), Fx.ratio(229, 40), Fx.ratio(307, 40), Fx.ratio(247, 40)), # l3
 				FxRect.new(Fx.ratio(157, 40), Fx.ratio(317, 40), Fx.ratio(257, 40), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(333, 40), Fx.ratio(167, 40), Fx.ratio(93, 8), Fx.ratio(247, 40)), -1], # slime
+				[2, FxRect.new(Fx.ratio(-451, 40), Fx.ratio(263, 40), Fx.ratio(-319, 40), Fx.ratio(343, 40)), 1], # drain
+				[2, FxRect.new(Fx.ratio(-257, 200), Fx.ratio(21, 2), Fx.ratio(403, 200), Fx.ratio(25, 2)), -1], # conveyor
 			]
 		"devanshu": # Dockside Dash
 			platforms = [
@@ -244,6 +296,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(193, 40), Fx.ratio(47, 8), Fx.ratio(293, 40), Fx.ratio(253, 40)), # l3
 				FxRect.new(Fx.ratio(143, 40), Fx.ratio(317, 40), Fx.ratio(243, 40), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(319, 40), Fx.ratio(173, 40), Fx.ratio(451, 40), Fx.ratio(253, 40)), -1], # tide
+				[0, FxRect.new(Fx.ratio(-437, 40), Fx.ratio(257, 40), Fx.ratio(-61, 8), Fx.ratio(337, 40)), 1], # lift
+				[2, FxRect.new(Fx.ratio(-327, 200), Fx.ratio(21, 2), Fx.ratio(333, 200), Fx.ratio(25, 2)), -1], # water
+			]
 		"faiz": # Tracking Yard
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -261,6 +318,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-321, 40), Fx.ratio(357, 40), Fx.ratio(-211, 40), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.ratio(221, 40), Fx.ratio(47, 8), Fx.ratio(321, 40), Fx.ratio(253, 40)), # l3
 				FxRect.new(Fx.ratio(171, 40), Fx.ratio(317, 40), Fx.ratio(271, 40), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(347, 40), Fx.ratio(173, 40), Fx.ratio(479, 40), Fx.ratio(253, 40)), -1], # magnet
+				[1, FxRect.new(Fx.ratio(-93, 8), Fx.ratio(257, 40), Fx.ratio(-333, 40), Fx.ratio(337, 40)), 1], # mine
+				[1, FxRect.new(Fx.ratio(-187, 200), Fx.ratio(21, 2), Fx.ratio(473, 200), Fx.ratio(25, 2)), -1], # sightline
 			]
 		"faizal": # Neon Greenhouse
 			platforms = [
@@ -280,6 +342,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-157, 20), Fx.ratio(29, 5), Fx.ratio(-107, 20), Fx.ratio(25, 4)), # l3
 				FxRect.new(Fx.ratio(-33, 5), Fx.ratio(317, 40), Fx.ratio(-41, 10), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[1, FxRect.new(Fx.ratio(-229, 20), Fx.ratio(17, 4), Fx.ratio(-163, 20), Fx.ratio(25, 4)), 1], # spore
+				[1, FxRect.new(Fx.ratio(17, 2), Fx.ratio(13, 2), Fx.ratio(59, 5), Fx.ratio(17, 2)), -1], # glass
+				[2, FxRect.new(Fx.ratio(-181, 100), Fx.ratio(21, 2), Fx.ratio(149, 100), Fx.ratio(25, 2)), 1], # gust
+			]
 		"harsh": # Laughing Ring
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -297,6 +364,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(211, 40), Fx.ratio(357, 40), Fx.ratio(321, 40), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.ratio(-321, 40), Fx.ratio(229, 40), Fx.ratio(-221, 40), Fx.ratio(247, 40)), # l3
 				FxRect.new(Fx.ratio(-271, 40), Fx.ratio(317, 40), Fx.ratio(-171, 40), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(-93, 8), Fx.ratio(167, 40), Fx.ratio(-333, 40), Fx.ratio(247, 40)), 1], # banana
+				[0, FxRect.new(Fx.ratio(347, 40), Fx.ratio(263, 40), Fx.ratio(479, 40), Fx.ratio(343, 40)), -1], # swing
+				[0, FxRect.new(Fx.ratio(-397, 200), Fx.ratio(21, 2), Fx.ratio(263, 200), Fx.ratio(25, 2)), 1], # spring
 			]
 		"maaz": # Rangbaazi Grand Finale
 			platforms = [
@@ -316,6 +388,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-307, 40), Fx.ratio(119, 20), Fx.ratio(-207, 40), Fx.ratio(32, 5)), # l3
 				FxRect.new(Fx.ratio(-257, 40), Fx.ratio(317, 40), Fx.ratio(-157, 40), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(-451, 40), Fx.ratio(22, 5), Fx.ratio(-319, 40), Fx.ratio(32, 5)), 1], # oil
+				[2, FxRect.new(Fx.ratio(333, 40), Fx.ratio(127, 20), Fx.ratio(93, 8), Fx.ratio(167, 20)), -1], # water
+				[1, FxRect.new(Fx.ratio(-327, 200), Fx.ratio(21, 2), Fx.ratio(333, 200), Fx.ratio(25, 2)), -1], # reactor
+			]
 		"manish": # Skyline Soundstage
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -333,6 +410,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(22, 5), Fx.ratio(357, 40), Fx.ratio(143, 20), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.ratio(-143, 20), Fx.ratio(47, 8), Fx.ratio(-93, 20), Fx.ratio(253, 40)), # l3
 				FxRect.new(Fx.ratio(-59, 10), Fx.ratio(317, 40), Fx.ratio(-17, 5), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(-43, 4), Fx.ratio(173, 40), Fx.ratio(-149, 20), Fx.ratio(253, 40)), 1], # speaker
+				[0, FxRect.new(Fx.ratio(39, 5), Fx.ratio(257, 40), Fx.ratio(111, 10), Fx.ratio(337, 40)), -1], # beatPad
+				[1, FxRect.new(Fx.ratio(-111, 100), Fx.ratio(21, 2), Fx.ratio(219, 100), Fx.ratio(25, 2)), -1], # coil
 			]
 		"nikhil": # Blade Circuit
 			platforms = [
@@ -352,6 +434,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(179, 40), Fx.ratio(229, 40), Fx.ratio(279, 40), Fx.ratio(247, 40)), # l3
 				FxRect.new(Fx.ratio(129, 40), Fx.ratio(317, 40), Fx.ratio(229, 40), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[1, FxRect.new(Fx.ratio(61, 8), Fx.ratio(167, 40), Fx.ratio(437, 40), Fx.ratio(247, 40)), -1], # laser
+				[1, FxRect.new(Fx.ratio(-423, 40), Fx.ratio(263, 40), Fx.ratio(-291, 40), Fx.ratio(343, 40)), 1], # shutter
+				[2, FxRect.new(Fx.ratio(-397, 200), Fx.ratio(21, 2), Fx.ratio(263, 200), Fx.ratio(25, 2)), 1], # vine
+			]
 		"rajat": # Sports Rooftops
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -369,6 +456,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-307, 40), Fx.ratio(357, 40), Fx.ratio(-197, 40), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.ratio(207, 40), Fx.ratio(113, 20), Fx.ratio(307, 40), Fx.ratio(61, 10)), # l3
 				FxRect.new(Fx.ratio(157, 40), Fx.ratio(317, 40), Fx.ratio(257, 40), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(333, 40), Fx.ratio(41, 10), Fx.ratio(93, 8), Fx.ratio(61, 10)), -1], # gust
+				[1, FxRect.new(Fx.ratio(-451, 40), Fx.ratio(133, 20), Fx.ratio(-319, 40), Fx.ratio(173, 20)), 1], # mirror
+				[0, FxRect.new(Fx.ratio(-257, 200), Fx.ratio(21, 2), Fx.ratio(403, 200), Fx.ratio(25, 2)), -1], # bounce
 			]
 		"rishabh": # Gadget Laboratory
 			platforms = [
@@ -388,6 +480,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-15, 2), Fx.ratio(113, 20), Fx.from_int(-5), Fx.ratio(61, 10)), # l3
 				FxRect.new(Fx.ratio(-25, 4), Fx.ratio(317, 40), Fx.ratio(-15, 4), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[1, FxRect.new(Fx.ratio(-111, 10), Fx.ratio(41, 10), Fx.ratio(-39, 5), Fx.ratio(61, 10)), 1], # reactor
+				[1, FxRect.new(Fx.ratio(163, 20), Fx.ratio(133, 20), Fx.ratio(229, 20), Fx.ratio(173, 20)), -1], # coil
+				[1, FxRect.new(Fx.ratio(-73, 50), Fx.ratio(21, 2), Fx.ratio(46, 25), Fx.ratio(25, 2)), -1], # laser
+			]
 		"saklan": # Tiffin Terminal
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -405,6 +502,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-143, 20), Fx.ratio(357, 40), Fx.ratio(-22, 5), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.ratio(93, 20), Fx.ratio(119, 20), Fx.ratio(143, 20), Fx.ratio(32, 5)), # l3
 				FxRect.new(Fx.ratio(17, 5), Fx.ratio(317, 40), Fx.ratio(59, 10), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(39, 5), Fx.ratio(22, 5), Fx.ratio(111, 10), Fx.ratio(32, 5)), -1], # conveyor
+				[1, FxRect.new(Fx.ratio(-43, 4), Fx.ratio(127, 20), Fx.ratio(-149, 20), Fx.ratio(167, 20)), 1], # alarm
+				[0, FxRect.new(Fx.ratio(-181, 100), Fx.ratio(21, 2), Fx.ratio(149, 100), Fx.ratio(25, 2)), 1], # steam
 			]
 		"salik": # Action Backlot
 			platforms = [
@@ -424,6 +526,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-293, 40), Fx.ratio(229, 40), Fx.ratio(-193, 40), Fx.ratio(247, 40)), # l3
 				FxRect.new(Fx.ratio(-243, 40), Fx.ratio(317, 40), Fx.ratio(-143, 40), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(-437, 40), Fx.ratio(167, 40), Fx.ratio(-61, 8), Fx.ratio(247, 40)), 1], # paper
+				[1, FxRect.new(Fx.ratio(319, 40), Fx.ratio(263, 40), Fx.ratio(451, 40), Fx.ratio(343, 40)), -1], # burner
+				[1, FxRect.new(Fx.ratio(-257, 200), Fx.ratio(21, 2), Fx.ratio(403, 200), Fx.ratio(25, 2)), -1], # alarm
+			]
 		"sarthak": # Scrapyard Showdown
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -441,6 +548,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-15, 2), Fx.ratio(357, 40), Fx.ratio(-19, 4), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.from_int(5), Fx.ratio(29, 5), Fx.ratio(15, 2), Fx.ratio(25, 4)), # l3
 				FxRect.new(Fx.ratio(15, 4), Fx.ratio(317, 40), Fx.ratio(25, 4), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[1, FxRect.new(Fx.ratio(163, 20), Fx.ratio(17, 4), Fx.ratio(229, 20), Fx.ratio(25, 4)), -1], # crusher
+				[2, FxRect.new(Fx.ratio(-111, 10), Fx.ratio(13, 2), Fx.ratio(-39, 5), Fx.ratio(17, 2)), 1], # magnet
+				[1, FxRect.new(Fx.ratio(-73, 50), Fx.ratio(21, 2), Fx.ratio(46, 25), Fx.ratio(25, 2)), -1], # rubble
 			]
 		"rooftops": # Rookie Rooftops
 			platforms = [
@@ -460,6 +572,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-321, 40), Fx.ratio(119, 20), Fx.ratio(-221, 40), Fx.ratio(32, 5)), # l3
 				FxRect.new(Fx.ratio(-271, 40), Fx.ratio(317, 40), Fx.ratio(-171, 40), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[0, FxRect.new(Fx.ratio(-93, 8), Fx.ratio(22, 5), Fx.ratio(-333, 40), Fx.ratio(32, 5)), 1], # spring
+				[1, FxRect.new(Fx.ratio(347, 40), Fx.ratio(127, 20), Fx.ratio(479, 40), Fx.ratio(167, 20)), -1], # shutter
+				[1, FxRect.new(Fx.ratio(-397, 200), Fx.ratio(21, 2), Fx.ratio(263, 200), Fx.ratio(25, 2)), 1], # crate
+			]
 		"shraddha": # Mohalla Mayhem
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -477,6 +594,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-15, 2), Fx.ratio(357, 40), Fx.ratio(-19, 4), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.from_int(5), Fx.ratio(229, 40), Fx.ratio(15, 2), Fx.ratio(247, 40)), # l3
 				FxRect.new(Fx.ratio(15, 4), Fx.ratio(317, 40), Fx.ratio(25, 4), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(163, 20), Fx.ratio(167, 40), Fx.ratio(229, 20), Fx.ratio(247, 40)), -1], # gravity
+				[2, FxRect.new(Fx.ratio(-111, 10), Fx.ratio(263, 40), Fx.ratio(-39, 5), Fx.ratio(343, 40)), 1], # gust
+				[0, FxRect.new(Fx.ratio(-73, 50), Fx.ratio(21, 2), Fx.ratio(46, 25), Fx.ratio(25, 2)), -1], # spring
 			]
 		"shubham": # Gully Stadium
 			platforms = [
@@ -496,6 +618,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-157, 20), Fx.ratio(229, 40), Fx.ratio(-107, 20), Fx.ratio(247, 40)), # l3
 				FxRect.new(Fx.ratio(-33, 5), Fx.ratio(317, 40), Fx.ratio(-41, 10), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[0, FxRect.new(Fx.ratio(-229, 20), Fx.ratio(167, 40), Fx.ratio(-163, 20), Fx.ratio(247, 40)), 1], # launcher
+				[0, FxRect.new(Fx.ratio(17, 2), Fx.ratio(263, 40), Fx.ratio(59, 5), Fx.ratio(343, 40)), -1], # bounce
+				[1, FxRect.new(Fx.ratio(-181, 100), Fx.ratio(21, 2), Fx.ratio(149, 100), Fx.ratio(25, 2)), 1], # glass
+			]
 		"simran": # Steel Courtyard
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -513,6 +640,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(197, 40), Fx.ratio(357, 40), Fx.ratio(307, 40), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.ratio(-307, 40), Fx.ratio(29, 5), Fx.ratio(-207, 40), Fx.ratio(25, 4)), # l3
 				FxRect.new(Fx.ratio(-257, 40), Fx.ratio(317, 40), Fx.ratio(-157, 40), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[1, FxRect.new(Fx.ratio(-451, 40), Fx.ratio(17, 4), Fx.ratio(-319, 40), Fx.ratio(25, 4)), 1], # mirror
+				[1, FxRect.new(Fx.ratio(333, 40), Fx.ratio(13, 2), Fx.ratio(93, 8), Fx.ratio(17, 2)), -1], # bell
+				[1, FxRect.new(Fx.ratio(-327, 200), Fx.ratio(21, 2), Fx.ratio(333, 200), Fx.ratio(25, 2)), -1], # shutter
 			]
 		"siraj": # Akhara Arena
 			platforms = [
@@ -532,6 +664,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-143, 20), Fx.ratio(29, 5), Fx.ratio(-93, 20), Fx.ratio(25, 4)), # l3
 				FxRect.new(Fx.ratio(-59, 10), Fx.ratio(317, 40), Fx.ratio(-17, 5), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[1, FxRect.new(Fx.ratio(-43, 4), Fx.ratio(17, 4), Fx.ratio(-149, 20), Fx.ratio(25, 4)), 1], # crack
+				[1, FxRect.new(Fx.ratio(39, 5), Fx.ratio(13, 2), Fx.ratio(111, 10), Fx.ratio(17, 2)), -1], # pillar
+				[2, FxRect.new(Fx.ratio(-111, 100), Fx.ratio(21, 2), Fx.ratio(219, 100), Fx.ratio(25, 2)), -1], # mud
+			]
 		"suhani": # Archer's Ascent
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -549,6 +686,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-157, 20), Fx.ratio(357, 40), Fx.ratio(-51, 10), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.ratio(107, 20), Fx.ratio(119, 20), Fx.ratio(157, 20), Fx.ratio(32, 5)), # l3
 				FxRect.new(Fx.ratio(41, 10), Fx.ratio(317, 40), Fx.ratio(33, 5), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(17, 2), Fx.ratio(22, 5), Fx.ratio(59, 5), Fx.ratio(32, 5)), -1], # vine
+				[0, FxRect.new(Fx.ratio(-229, 20), Fx.ratio(127, 20), Fx.ratio(-163, 20), Fx.ratio(167, 20)), 1], # bridge
+				[2, FxRect.new(Fx.ratio(-111, 100), Fx.ratio(21, 2), Fx.ratio(219, 100), Fx.ratio(25, 2)), -1], # gust
 			]
 		"tushar": # Frost Factory
 			platforms = [
@@ -568,6 +710,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-279, 40), Fx.ratio(119, 20), Fx.ratio(-179, 40), Fx.ratio(32, 5)), # l3
 				FxRect.new(Fx.ratio(-229, 40), Fx.ratio(317, 40), Fx.ratio(-129, 40), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(-423, 40), Fx.ratio(22, 5), Fx.ratio(-291, 40), Fx.ratio(32, 5)), 1], # ice
+				[0, FxRect.new(Fx.ratio(61, 8), Fx.ratio(127, 20), Fx.ratio(437, 40), Fx.ratio(167, 20)), -1], # steam
+				[2, FxRect.new(Fx.ratio(-187, 200), Fx.ratio(21, 2), Fx.ratio(473, 200), Fx.ratio(25, 2)), -1], # conveyor
+			]
 		"unnati": # Colour Carnival
 			platforms = [
 				FxRect.new(Fx.from_int(-16), Fx.ratio(-11, 10), Fx.from_int(16), Fx.from_int(0)), # floor
@@ -585,6 +732,11 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-293, 40), Fx.ratio(357, 40), Fx.ratio(-183, 40), Fx.ratio(75, 8)), # r5
 				FxRect.new(Fx.ratio(193, 40), Fx.ratio(119, 20), Fx.ratio(293, 40), Fx.ratio(32, 5)), # l3
 				FxRect.new(Fx.ratio(143, 40), Fx.ratio(317, 40), Fx.ratio(243, 40), Fx.ratio(67, 8)), # l4
+			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(319, 40), Fx.ratio(22, 5), Fx.ratio(451, 40), Fx.ratio(32, 5)), -1], # paint
+				[2, FxRect.new(Fx.ratio(-437, 40), Fx.ratio(127, 20), Fx.ratio(-61, 8), Fx.ratio(167, 20)), 1], # sprinkler
+				[0, FxRect.new(Fx.ratio(-327, 200), Fx.ratio(21, 2), Fx.ratio(333, 200), Fx.ratio(25, 2)), -1], # bounce
 			]
 		"vinayak": # Water-Tank Terrace
 			platforms = [
@@ -604,11 +756,20 @@ static func by_id(stage_id: String) -> StageDefinition:
 				FxRect.new(Fx.ratio(-293, 40), Fx.ratio(113, 20), Fx.ratio(-193, 40), Fx.ratio(61, 10)), # l3
 				FxRect.new(Fx.ratio(-243, 40), Fx.ratio(317, 40), Fx.ratio(-143, 40), Fx.ratio(67, 8)), # l4
 			]
+			hazards = [
+				[2, FxRect.new(Fx.ratio(-437, 40), Fx.ratio(41, 10), Fx.ratio(-61, 8), Fx.ratio(61, 10)), 1], # water
+				[1, FxRect.new(Fx.ratio(319, 40), Fx.ratio(133, 20), Fx.ratio(451, 40), Fx.ratio(173, 20)), -1], # coil
+				[2, FxRect.new(Fx.ratio(-257, 200), Fx.ratio(21, 2), Fx.ratio(403, 200), Fx.ratio(25, 2)), -1], # drain
+			]
 		_:
 			return null
 	var s := StageDefinition.new()
 	s.id = stage_id
 	s.platforms = platforms
+	for h: Array in hazards:
+		s.hazard_kinds.append(h[0])
+		s.hazard_zones.append(h[1])
+		s.hazard_dirs.append(h[2])
 	s.spawn_x = PackedInt64Array([Fx.from_int(-11), Fx.from_int(11), Fx.from_int(-4), Fx.from_int(4), Fx.from_int(-8), Fx.from_int(8), Fx.from_int(-1), Fx.from_int(1)])
 	s.spawn_y = PackedInt64Array([Fx.from_int(2), Fx.from_int(2), Fx.from_int(2), Fx.from_int(2), Fx.from_int(2), Fx.from_int(2), Fx.from_int(2), Fx.from_int(2)])
 	s.blast_zone = FxRect.new(Fx.from_int(-26), Fx.from_int(-10), Fx.from_int(26), Fx.from_int(22))

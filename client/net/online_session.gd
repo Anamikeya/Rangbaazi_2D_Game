@@ -70,6 +70,8 @@ var _last_hello_tick := -1000000
 func _init(relay_url: String, room_code: String, input_delay: int = 2, socket_factory: Callable = Callable()) -> void:
 	_url = relay_url
 	room = room_code.to_upper()
+	rules.flurry = true
+	rules.hazards = true
 	rules.weapons = true # duels have weapons; no signature bonus, since peers don't swap fighters yet
 	_input_delay = input_delay
 	_socket_factory = socket_factory

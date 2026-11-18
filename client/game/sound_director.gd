@@ -11,6 +11,7 @@ const VOICES := 12
 const STEP_FRAMES := 15 # a footstep every quarter second while running
 const RUN_SPEED := 0.03 # metres per frame that count as running
 const WARN_FRAMES := 600 # the last ten seconds tick
+const START_FRAME := 50 # "FIGHT!" (ArenaView's start banner)
 
 var _music: AudioStreamPlayer
 var _ambience: AudioStreamPlayer
@@ -26,6 +27,7 @@ var _was_over := false
 var _last_warn_second := -1
 var _bombs := 0 # cherry bombs in flight last frame: one fewer is a burst
 var _bullets := 0
+var _crates := 0 # weapon crates resting on the stage last frame
 
 
 func _ready() -> void:
@@ -110,6 +112,7 @@ func observe(state: GameState, characters: PackedStringArray, you: int, frames_l
 		return
 	if state.frame == _seen_frame:
 		return
+	var before := _seen_frame
 	var fresh := _seen.size() != state.fighters.size() or state.frame != _seen_frame + 1
 	_seen_frame = state.frame
 	if fresh:
@@ -119,7 +122,14 @@ func observe(state: GameState, characters: PackedStringArray, you: int, frames_l
 		_was_over = state.match_over
 		_bombs = _count_shots(state, Weapons.SHOT_BOMB)
 		_bullets = _count_shots(state, Weapons.SHOT_BULLET)
+		_crates = _count_landed_crates(state)
+		if state.frame < START_FRAME:
+			play("pickup", -2.0, 0.8) # "READY?"
 		return
+
+	# "FIGHT!" as the banner pops.
+	if before < START_FRAME and state.frame >= START_FRAME and not state.match_over:
+		play("guts", 0.0, 1.25)
 
 	var loud := 0
 	for i in state.fighters.size():
@@ -140,6 +150,8 @@ func observe(state: GameState, characters: PackedStringArray, you: int, frames_l
 				play("hit", near, randf_range(0.9, 1.1))
 				if f.hit_stop >= 8:
 					play("big_hit", near - 2.0)
+					if i == you:
+						play("hurt", -2.0) # a big one landed on you
 				loud += 1
 			if f.action == Fighter.Action.STUNNED and s[0] != Fighter.Action.STUNNED:
 				play("parry", near + 2.0)
@@ -174,6 +186,11 @@ func observe(state: GameState, characters: PackedStringArray, you: int, frames_l
 	if bombs < _bombs:
 		play("boom", 2.0)
 	_bombs = bombs
+	# A crate thumps down.
+	var crates := _count_landed_crates(state)
+	if crates > _crates:
+		play("land", -8.0, 0.7)
+	_crates = crates
 	# Every new bullet rattles (rooms don't send the Uzi's shot count, so count bullets).
 	var bullets := _count_shots(state, Weapons.SHOT_BULLET)
 	if bullets > _bullets:
@@ -195,5 +212,13 @@ func _count_shots(state: GameState, shot: int) -> int:
 	var n := 0
 	for p in state.props:
 		if p.kind == Weapons.PROP_SHOT and p.shot == shot:
+			n += 1
+	return n
+
+
+func _count_landed_crates(state: GameState) -> int:
+	var n := 0
+	for p in state.props:
+		if p.kind == Weapons.PROP_BOX and p.grounded:
 			n += 1
 	return n

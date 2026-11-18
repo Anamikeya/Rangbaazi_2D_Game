@@ -52,6 +52,18 @@ const FILL_PRESSED := Color(1, 0.82, 0.25, 0.45)
 const RING := Color(1, 1, 1, 0.42)
 const LABEL := Color(1, 1, 1, 0.8)
 
+## What the big attack button says while a weapon is in hand, by the sim's weapon id.
+const WEAPON_VERBS := ["Kick", "Bonk", "Swing", "Roll", "Blast", "Fire", "Lob", "Shoot"]
+const ARMED_RING := Color(1, 0.82, 0.25, 0.9)
+
+## The local fighter's weapon (Weapons id, 0 for none), set by the scene: the attack button shows
+## it and names what it does; the small button is Throw with a weapon and Combo without one.
+var weapon := 0:
+	set(value):
+		if value != weapon:
+			weapon = value
+			queue_redraw()
+
 ## touch index -> NOTHING, MOVE or an index into PAD_BUTTONS.
 var _targets: Dictionary[int, int] = {}
 ## touch index -> where the finger is now, for fingers on the move pad.
@@ -90,7 +102,9 @@ func buttons() -> int:
 		if target == MOVE:
 			b |= _move_buttons(_move_fingers[index])
 		elif target >= 0:
-			b |= PAD_BUTTONS[target][0] as int
+			var button: int = PAD_BUTTONS[target][0]
+			# Empty-handed, the Throw button is Combo: Kick and Heavy on the same frame (the flurry).
+			b |= (Buttons.LIGHT | Buttons.HEAVY) if button == Buttons.DROP_WEAPON and weapon == 0 else button
 	return b & Buttons.KNOWN
 
 
@@ -257,13 +271,31 @@ func _draw() -> void:
 	for i in PAD_BUTTONS.size():
 		var center := _button_center(i)
 		var radius: float = PAD_BUTTONS[i][2]
-		var lit := (held & (PAD_BUTTONS[i][0] as int)) != 0
-		draw_circle(center, radius, FILL_PRESSED if lit else FILL)
-		draw_circle(center, radius, RING, false, 4.0, true)
-		var text: String = PAD_BUTTONS[i][1]
+		var button: int = PAD_BUTTONS[i][0]
+		var armed := weapon > 0 and weapon < WEAPON_VERBS.size()
+		var combo := button == Buttons.DROP_WEAPON and not armed
+		var lit := (held & (Buttons.LIGHT | Buttons.HEAVY)) == (Buttons.LIGHT | Buttons.HEAVY) if combo else (held & button) != 0
+		var dim := 1.0
+		draw_circle(center, radius, FILL_PRESSED if lit else Color(FILL, FILL.a * dim))
+		var ring := ARMED_RING if armed and (button == Buttons.LIGHT or button == Buttons.DROP_WEAPON) else RING
+		draw_circle(center, radius, Color(ring, ring.a * dim), false, 4.0, true)
+		var text: String = "Combo" if combo else PAD_BUTTONS[i][1]
 		var font_size := int(radius * 0.34)
+		var text_y := font_size * 0.35
+		if armed and button == Buttons.LIGHT:
+			# The weapon in hand, and what the button does with it.
+			text = WEAPON_VERBS[weapon]
+			var tex := ArtLibrary.weapon_texture(weapon)
+			if tex != null:
+				var w := radius * 1.05
+				var h := w * tex.get_height() / maxf(1.0, tex.get_width())
+				if h > radius * 0.8:
+					w *= radius * 0.8 / h
+					h = radius * 0.8
+				draw_texture_rect(tex, Rect2(center + Vector2(-w / 2, -h / 2 - radius * 0.2), Vector2(w, h)), false, Color(1, 1, 1, 0.95))
+				text_y = radius * 0.62
 		var width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-		draw_string(font, center + Vector2(-width / 2, font_size * 0.35), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, LABEL)
+		draw_string(font, center + Vector2(-width / 2, text_y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color(LABEL, LABEL.a * dim))
 
 
 ## A filled triangle centred on c, pointing along dir, `half` from its centre to its tip.

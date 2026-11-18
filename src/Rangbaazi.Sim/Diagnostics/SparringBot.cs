@@ -53,7 +53,12 @@ public static class SparringBot
 {
     /// <summary>Stop walking at this distance; the jab hits out to ~1.5 m between centres.</summary>
     private static readonly Fix JabRange = Fix.FromRatio(6, 5);
-    private static readonly Fix ChaseHeight = Fix.FromRatio(3, 2);
+    /// <summary>
+    /// Jump after an opponent standing this much higher or more. It equals the height gap past which
+    /// the bot no longer attacks (1 m), so there is no band in between where it would just stand
+    /// under someone on a low step.
+    /// </summary>
+    private static readonly Fix ChaseHeight = Fix.One;
     private static readonly Fix ChaseDistance = Fix.FromInt(4);
 
     /// <summary>
@@ -192,7 +197,7 @@ public static class SparringBot
         // Jump after them only when they stand on a platform above. Jumping at someone who is just
         // in the air above makes two bots take turns jumping at each other, with every jab whiffing
         // because the height gap changes faster than the jab comes out.
-        if (me.Grounded && canJump && op.Grounded && dy > ChaseHeight && Fix.Abs(dx) < ChaseDistance) b |= Buttons.Jump;
+        if (me.Grounded && canJump && op.Grounded && dy >= ChaseHeight && Fix.Abs(dx) < ChaseDistance) b |= Buttons.Jump;
         return b;
     }
 

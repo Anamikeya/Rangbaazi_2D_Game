@@ -50,6 +50,16 @@ public sealed class MatchRules
     /// </summary>
     public int RespawnShield { get; init; }
 
+    /// <summary>
+    /// The fist flurry: empty-handed, Light and Heavy pressed on the same frame start one of four
+    /// combos at random, with equal odds (a jab; a neutral heavy; a jab then a neutral heavy; two
+    /// neutral heavies). Off, both together are the heavy, as in combat spec v0.1.
+    /// </summary>
+    public bool Flurry { get; init; }
+
+    /// <summary>The stage's hazards run (StageDefinition.Hazards). Off, they are scenery.</summary>
+    public bool Hazards { get; init; }
+
     /// <summary>Prop Boxes drop weapons (Weapons.cs). Off, the match is fists only.</summary>
     public bool Weapons { get; init; }
 
@@ -70,6 +80,8 @@ public sealed class MatchRules
         RagePercent = 50,
         RespawnShield = 20,
         Weapons = true,
+        Hazards = true,
+        Flurry = true,
         Signatures = signatures,
     };
 }
@@ -114,15 +126,16 @@ public static partial class Simulation
         {
             Fighter[] fighters = state.Fighters;
             Span<bool> frozen = stackalloc bool[fighters.Length];
-            for (int i = 0; i < fighters.Length; i++) frozen[i] = UpdateFighter(ref fighters[i], i, inputs[i], rules);
+            for (int i = 0; i < fighters.Length; i++) frozen[i] = UpdateFighter(state, ref fighters[i], i, inputs[i], rules);
             if (rules.Weapons) FireShots(state, frozen, rules);
-            ResolveHits(fighters, frozen, rules);
+            ResolveHits(state, frozen, rules);
             if (rules.Weapons) UpdateProps(state, frozen, rules);
+            if (rules.Hazards) ApplyHazards(state, rules);
             for (int i = 0; i < fighters.Length; i++)
             {
                 EndPlungeOnLanding(ref fighters[i], rules.Tuning);
                 if (rules.Weapons) ReturnOnFall(state, i, rules);
-                CheckBlastZone(fighters, i, rules);
+                CheckBlastZone(state, i, rules);
             }
             CheckMatchOver(state, rules);
         }
@@ -171,7 +184,7 @@ public static partial class Simulation
         new(f.Position.X - t.HalfWidth, f.Position.Y, f.Position.X + t.HalfWidth, f.Position.Y + t.Height);
 
     /// <summary>Steps one fighter. Returns true if it spent this frame frozen in hit-stop.</summary>
-    private static bool UpdateFighter(ref Fighter f, int index, Buttons input, MatchRules rules)
+    private static bool UpdateFighter(GameState state, ref Fighter f, int index, Buttons input, MatchRules rules)
     {
         FighterTuning t = rules.Tuning;
 
@@ -217,7 +230,7 @@ public static partial class Simulation
                 break;
 
             case FighterAction.Idle:
-                gravity = HandleControl(ref f, input, pressed, t);
+                gravity = HandleControl(state, ref f, input, pressed, rules);
                 break;
         }
 
@@ -256,8 +269,9 @@ public static partial class Simulation
     /// action is the one for where the fighter stands: Jump + Down + Heavy on the ground is the
     /// down heavy, not a ground slam that would cancel the jump. Returns whether gravity applies.
     /// </summary>
-    private static bool HandleControl(ref Fighter f, Buttons input, Buttons pressed, FighterTuning t)
+    private static bool HandleControl(GameState state, ref Fighter f, Buttons input, Buttons pressed, MatchRules rules)
     {
+        FighterTuning t = rules.Tuning;
         int dir = Horizontal(input);
         if (dir != 0) f.Facing = dir;
 
@@ -272,7 +286,17 @@ public static partial class Simulation
         }
 
         MoveId move = MoveId.None;
+        f.FlurryNext = MoveId.None;
+        const Buttons both = Buttons.Light | Buttons.Heavy;
         if (f.Weapon != WeaponId.None) move = ArmedMove(in f, input, pressed);
+        else if (rules.Flurry && (pressed & both) == both && (input & Buttons.Up) == 0)
+        {
+            // The fist flurry: the match's own random stream picks it, so every device agrees
+            // and nobody can choose the result.
+            int roll = state.Random.Range(0, 4);
+            move = roll == 0 || roll == 2 ? MoveId.Jab : MoveId.NeutralHeavy;
+            if (roll >= 2) f.FlurryNext = MoveId.NeutralHeavy;
+        }
         else
         {
             if ((pressed & Buttons.Heavy) != 0) move = HeavyFor(in f, input, dir);
@@ -337,6 +361,15 @@ public static partial class Simulation
         if (f.Move == MoveId.UziFire && f.ActionFrame == m.Startup + Weapons.UziInterval
             && (input & (Buttons.Light | Buttons.Heavy)) != 0 && f.WeaponSupply > 0)
             f.ActionFrame = m.Startup;
+        if (f.ActionFrame >= m.TotalFrames && f.FlurryNext != MoveId.None)
+        {
+            // The flurry's second hit starts the frame after the first one ends: no gap to dodge in.
+            f.Move = f.FlurryNext;
+            f.FlurryNext = MoveId.None;
+            f.ActionFrame = 0;
+            f.AttackConnected = false;
+            return AttackMotion(ref f, input, t, steer: false);
+        }
         if (f.ActionFrame >= m.TotalFrames)
         {
             f.Action = FighterAction.Idle;
@@ -495,8 +528,9 @@ public static partial class Simulation
     /// hits. Fighters that spent this frame frozen in hit-stop don't attack: a frozen hitbox waits
     /// until its owner moves again (this matters for an armored fighter hit mid-attack).
     /// </summary>
-    private static void ResolveHits(Fighter[] fighters, ReadOnlySpan<bool> frozen, MatchRules rules)
+    private static void ResolveHits(GameState state, ReadOnlySpan<bool> frozen, MatchRules rules)
     {
+        Fighter[] fighters = state.Fighters;
         FighterTuning t = rules.Tuning;
         int n = fighters.Length;
 
@@ -536,7 +570,7 @@ public static partial class Simulation
         for (int i = 0; i < contacts; i++)
             if (contactParried[i]) ApplyParry(ref fighters[contactAttacker[i]], ref fighters[contactTarget[i]], rules);
         for (int i = 0; i < contacts; i++)
-            if (!contactParried[i]) ApplyHit(fighters, contactAttacker[i], contactTarget[i], (MoveId)contactMove[i], rules);
+            if (!contactParried[i]) ApplyHit(state, contactAttacker[i], contactTarget[i], (MoveId)contactMove[i], rules);
     }
 
     /// <summary>
@@ -558,6 +592,7 @@ public static partial class Simulation
         atk.AttackConnected = true;
         atk.Action = FighterAction.Stunned;
         atk.Move = MoveId.None;
+        atk.FlurryNext = MoveId.None;
         atk.ActionFrame = 0;
         atk.HitstunFrames = rules.Tuning.ParryStunFrames;
         atk.Velocity = new FixVec2(Fix.Zero, Fix.Min(atk.Velocity.Y, Fix.Zero));
@@ -590,6 +625,8 @@ public static partial class Simulation
         public int HitstunBonus;
         public bool NoHitStop;       // Uzi bullets: the target doesn't freeze
         public bool MaxHitStop;      // sweet spots always freeze the longest
+        public WeaponId Weapon;      // what it came from (None: fists or a hazard)
+        public bool Sweet;           // a sweet-spot hit
 
         public Hit(MoveData m)
         {
@@ -602,6 +639,8 @@ public static partial class Simulation
             HitstunBonus = m.HitstunBonus;
             NoHitStop = false;
             MaxHitStop = false;
+            Weapon = WeaponId.None;
+            Sweet = false;
         }
 
         /// <summary>A sweet-spot hit: 1.25x damage and base knockback, the longest hit-stop.</summary>
@@ -610,12 +649,14 @@ public static partial class Simulation
             Percent = Percent * Weapons.SweetPercent / 100;
             BaseKnockback = BaseKnockback * Weapons.SweetPercent / 100;
             MaxHitStop = true;
+            Sweet = true;
         }
     }
 
     /// <summary>A fighter's move connects: fists, or a melee weapon (belan, bat, shotgun).</summary>
-    private static void ApplyHit(Fighter[] fighters, int attacker, int target, MoveId move, MatchRules rules)
+    private static void ApplyHit(GameState state, int attacker, int target, MoveId move, MatchRules rules)
     {
+        Fighter[] fighters = state.Fighters;
         ref Fighter atk = ref fighters[attacker];
         ref Fighter def = ref fighters[target];
         atk.AttackConnected = true;
@@ -635,7 +676,8 @@ public static partial class Simulation
             MeleeWeaponHit(ref atk, in def, move, ref hit, rules);
         }
         if (weapon != WeaponId.None && rules.SignatureOf(attacker) == weapon) hit.Percent = hit.Percent * Weapons.SignaturePercent / 100;
-        LandHit(fighters, attacker, target, in hit, side, freezeAttacker: true, rules);
+        hit.Weapon = weapon;
+        LandHit(state, attacker, target, in hit, side, freezeAttacker: true, rules);
     }
 
     /// <summary>
@@ -678,8 +720,9 @@ public static partial class Simulation
     /// Applies a hit: rage, the hidden second wind, Josh, hit-stop, Guts, then knockback in
     /// direction <paramref name="side"/>. Projectiles don't freeze their owner.
     /// </summary>
-    private static void LandHit(Fighter[] fighters, int attacker, int target, in Hit hit, int side, bool freezeAttacker, MatchRules rules)
+    private static void LandHit(GameState state, int attacker, int target, in Hit hit, int side, bool freezeAttacker, MatchRules rules)
     {
+        Fighter[] fighters = state.Fighters;
         ref Fighter atk = ref fighters[attacker];
         ref Fighter def = ref fighters[target];
 
@@ -694,6 +737,16 @@ public static partial class Simulation
         def.Josh = Math32.Min(rules.MaxJosh, def.Josh + damage - absorbed);
         def.LastHitBy = attacker + 1;
         def.LastHitTimer = rules.KoCreditFrames;
+        def.LastHitWeapon = hit.Weapon;
+        def.LastHitSweet = hit.Sweet;
+        def.HitCount++;
+        if (attacker != target)
+        {
+            // The attacker's record with this weapon, for the winner's nickname.
+            int stats = (attacker * Weapons.Count + (int)hit.Weapon) * 3;
+            state.WeaponStats[stats] += damage;
+            if (hit.Sweet) state.WeaponStats[stats + 2]++;
+        }
         if (!hit.NoHitStop)
         {
             int stop = hit.MaxHitStop ? rules.MaxHitStop : HitStopFrames(damage, rules);
@@ -719,20 +772,26 @@ public static partial class Simulation
         def.Grounded = false;
         def.Action = FighterAction.Hitstun;
         def.Move = MoveId.None;
+        def.FlurryNext = MoveId.None;
         def.ActionFrame = 0;
         def.HitstunFrames = Math32.Max(1, 8 + def.Josh / 8 + hit.HitstunBonus);
         def.AirDodgeUsed = false; // getting hit gives back the air dodge and the recovery
         def.RecoveryUsed = false;
     }
 
-    private static void CheckBlastZone(Fighter[] fighters, int index, MatchRules rules)
+    private static void CheckBlastZone(GameState state, int index, MatchRules rules)
     {
+        Fighter[] fighters = state.Fighters;
         ref Fighter f = ref fighters[index];
         if (!f.IsActive || rules.Stage.BlastZone.Contains(f.Position)) return;
 
         // The KO goes to whoever hit this fighter last, if that was recent; a lone fall scores none.
         f.Falls++;
-        if (f.LastHitTimer > 0 && f.LastHitBy > 0 && f.LastHitBy - 1 != index) fighters[f.LastHitBy - 1].Kos++;
+        if (f.LastHitTimer > 0 && f.LastHitBy > 0 && f.LastHitBy - 1 != index)
+        {
+            fighters[f.LastHitBy - 1].Kos++;
+            state.WeaponStats[((f.LastHitBy - 1) * Weapons.Count + (int)f.LastHitWeapon) * 3 + 1]++; // the weapon's KO
+        }
         f.LastHitBy = 0;
         f.LastHitTimer = 0;
 
@@ -774,6 +833,74 @@ public static partial class Simulation
         {
             state.MatchOver = true;
             state.WinnerIndex = alive == 1 ? last : -1;
+        }
+    }
+
+    /// <summary>
+    /// A fighter's main weapon in this match, for their nickname: the weapon (0 is fists) that did
+    /// the most of their damage, if that is at least 40% of it; otherwise -1, an all-rounder.
+    /// <paramref name="master"/>: they also landed 3 or more sweet spots and a KO with it.
+    /// </summary>
+    public static int MainWeapon(GameState state, int fighter, out bool master)
+    {
+        master = false;
+        int total = 0, best = -1, bestDamage = 0;
+        int from = fighter * Weapons.Count * 3;
+        for (int w = 0; w < Weapons.Count; w++)
+        {
+            int damage = state.WeaponStats[from + w * 3];
+            total += damage;
+            if (damage > bestDamage)
+            {
+                best = w;
+                bestDamage = damage;
+            }
+        }
+        if (best < 0 || bestDamage * 100 < total * 40) return -1;
+        master = state.WeaponStats[from + best * 3 + 2] >= 3 && state.WeaponStats[from + best * 3 + 1] >= 1;
+        return best;
+    }
+
+    /// <summary>
+    /// The stage's hazards, while active: a launch pad flings up a fighter standing in it, a
+    /// pusher carries everyone in it sideways, and a striker hits everyone in it every
+    /// <see cref="Hazards.HitEvery"/> frames. A dodging fighter is untouched. Hazard hits credit
+    /// nobody with a KO.
+    /// </summary>
+    private static void ApplyHazards(GameState state, MatchRules rules)
+    {
+        var hazards = rules.Stage.Hazards;
+        Fighter[] fighters = state.Fighters;
+        for (int k = 0; k < hazards.Count; k++)
+        {
+            int at = Hazards.CycleAt(state.Frame, k);
+            if (at < Hazards.ActiveAt || at >= Hazards.CooldownAt) continue;
+            Hazard h = hazards[k];
+            for (int i = 0; i < fighters.Length; i++)
+            {
+                ref Fighter f = ref fighters[i];
+                if (!f.IsActive || IsIntangible(in f, rules.Tuning)) continue;
+                if (!h.Zone.Overlaps(Hurtbox(in f, rules.Tuning))) continue;
+                switch (h.Kind)
+                {
+                    case HazardKind.Launch:
+                        if (f.Grounded && f.Action != FighterAction.Hitstun)
+                        {
+                            f.Velocity.Y = Hazards.LaunchSpeed;
+                            f.Grounded = false;
+                        }
+                        break;
+                    case HazardKind.Push:
+                        f.Position.X += Hazards.PushSpeed * h.Direction;
+                        break;
+                    case HazardKind.Hit:
+                        if ((at - Hazards.ActiveAt) % Hazards.HitEvery != 0) break;
+                        var hit = new Hit(Hazards.Strike);
+                        int side = f.Position.X * 2 >= h.Zone.MinX + h.Zone.MaxX ? 1 : -1;
+                        LandHit(state, i, i, in hit, side, freezeAttacker: false, rules);
+                        break;
+                }
+            }
         }
     }
 
@@ -832,6 +959,7 @@ public static partial class Simulation
         f.UziShots = 0;
         f.UziStreak = 0;
         f.UziTarget = 0;
+        f.FlurryNext = MoveId.None;
     }
 }
 

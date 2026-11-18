@@ -11,7 +11,7 @@ const TICKS_PER_SECOND := 60
 
 ## Bump when the sim's behaviour changes on purpose: online players with different versions
 ## refuse to play each other instead of desyncing.
-const SIM_VERSION := 3
+const SIM_VERSION := 5
 
 ## Most fighters in one match: online rooms hold up to 15 players (one spare slot).
 const MAX_FIGHTERS := 16
@@ -46,17 +46,19 @@ static func advance(state: GameState, rules: MatchRules, inputs: PackedInt32Arra
 		var frozen: Array[bool] = []
 		frozen.resize(fighters.size())
 		for i in fighters.size():
-			frozen[i] = _update_fighter(fighters[i], i, inputs[i], rules)
+			frozen[i] = _update_fighter(state, fighters[i], i, inputs[i], rules)
 		if rules.weapons:
 			_fire_shots(state, frozen, rules)
-		_resolve_hits(fighters, frozen, rules)
+		_resolve_hits(state, frozen, rules)
 		if rules.weapons:
 			_update_props(state, frozen, rules)
+		if rules.hazards:
+			_apply_hazards(state, rules)
 		for i in fighters.size():
 			_end_plunge_on_landing(fighters[i], rules.tuning)
 			if rules.weapons:
 				_return_on_fall(state, i, rules)
-			_check_blast_zone(fighters, i, rules)
+			_check_blast_zone(state, i, rules)
 		_check_match_over(state, rules)
 	state.frame += 1
 
@@ -100,7 +102,7 @@ static func hurtbox(f: Fighter, t: FighterTuning) -> FxRect:
 
 
 ## Steps one fighter. Returns true if it spent this frame frozen in hit-stop.
-static func _update_fighter(f: Fighter, index: int, input: int, rules: MatchRules) -> bool:
+static func _update_fighter(state: GameState, f: Fighter, index: int, input: int, rules: MatchRules) -> bool:
 	var t := rules.tuning
 
 	if f.action == A_ELIMINATED or f.action == A_RESPAWNING:
@@ -137,7 +139,7 @@ static func _update_fighter(f: Fighter, index: int, input: int, rules: MatchRule
 		A_DODGE:
 			gravity = _update_dodge(f, t)
 		A_IDLE:
-			gravity = _handle_control(f, input, pressed, t)
+			gravity = _handle_control(state, f, input, pressed, rules)
 
 	_apply_physics(f, rules, gravity)
 	return false
@@ -167,7 +169,8 @@ static func _tick_timers(f: Fighter, rules: MatchRules) -> void:
 
 ## Movement, then at most one of: a dodge, a heavy, a jab or a jump, in that order of priority.
 ## A jump pressed on the same frame as an attack or dodge is ignored. Returns whether gravity applies.
-static func _handle_control(f: Fighter, input: int, pressed: int, t: FighterTuning) -> bool:
+static func _handle_control(state: GameState, f: Fighter, input: int, pressed: int, rules: MatchRules) -> bool:
+	var t := rules.tuning
 	var dir := _horizontal(input)
 	if dir != 0:
 		f.facing = dir
@@ -182,8 +185,17 @@ static func _handle_control(f: Fighter, input: int, pressed: int, t: FighterTuni
 		return false
 
 	var move: int = MoveData.Id.NONE
+	f.flurry_next = MoveData.Id.NONE
+	var both := Buttons.LIGHT | Buttons.HEAVY
 	if f.weapon != Weapons.NONE:
 		move = _armed_move(f, input, pressed)
+	elif rules.flurry and (pressed & both) == both and (input & Buttons.UP) == 0:
+		# The fist flurry: the match's own random stream picks it, so every device agrees and
+		# nobody can choose the result.
+		var roll := _rand_range(state, 0, 4)
+		move = MoveData.Id.JAB if roll == 0 or roll == 2 else MoveData.Id.NEUTRAL_HEAVY
+		if roll >= 2:
+			f.flurry_next = MoveData.Id.NEUTRAL_HEAVY
 	else:
 		if (pressed & Buttons.HEAVY) != 0:
 			move = _heavy_for(f, input, dir)
@@ -240,6 +252,13 @@ static func _update_attack(f: Fighter, input: int, t: FighterTuning) -> bool:
 	if f.move == MoveData.Id.UZI_FIRE and f.action_frame == m.startup + Weapons.UZI_INTERVAL \
 			and (input & (Buttons.LIGHT | Buttons.HEAVY)) != 0 and f.weapon_supply > 0:
 		f.action_frame = m.startup
+	if f.action_frame >= m.total_frames() and f.flurry_next != MoveData.Id.NONE:
+		# The flurry's second hit starts the frame after the first one ends: no gap to dodge in.
+		f.move = f.flurry_next
+		f.flurry_next = MoveData.Id.NONE
+		f.action_frame = 0
+		f.attack_connected = false
+		return _attack_motion(f, input, t, false)
 	if f.action_frame >= m.total_frames():
 		f.action = A_IDLE
 		f.move = MoveData.Id.NONE
@@ -367,7 +386,8 @@ static func _apply_physics(f: Fighter, rules: MatchRules, gravity: bool) -> void
 
 ## Finds every attacker whose active hitbox touches another fighter, then applies parries and hits.
 ## Fighters that spent this frame frozen in hit-stop don't attack.
-static func _resolve_hits(fighters: Array[Fighter], frozen: Array[bool], rules: MatchRules) -> void:
+static func _resolve_hits(state: GameState, frozen: Array[bool], rules: MatchRules) -> void:
+	var fighters := state.fighters
 	var t := rules.tuning
 	var n := fighters.size()
 
@@ -406,7 +426,7 @@ static func _resolve_hits(fighters: Array[Fighter], frozen: Array[bool], rules: 
 			_apply_parry(fighters[contact_attacker[i]], fighters[contact_target[i]], rules)
 	for i in contact_attacker.size():
 		if not contact_parried[i]:
-			_apply_hit(fighters, contact_attacker[i], contact_target[i], contact_move[i], rules)
+			_apply_hit(state, contact_attacker[i], contact_target[i], contact_move[i], rules)
 
 
 ## The rage multiplier, in percent, for hits by a fighter at this Josh:
@@ -423,6 +443,7 @@ static func _apply_parry(atk: Fighter, def: Fighter, rules: MatchRules) -> void:
 	atk.attack_connected = true
 	atk.action = A_STUNNED
 	atk.move = MoveData.Id.NONE
+	atk.flurry_next = MoveData.Id.NONE
 	atk.action_frame = 0
 	atk.hitstun_frames = rules.tuning.parry_stun_frames
 	atk.vel_x = 0
@@ -454,6 +475,8 @@ class Hit:
 	var hitstun_bonus := 0
 	var no_hit_stop := false    # Uzi bullets: the target doesn't freeze
 	var max_hit_stop := false   # sweet spots always freeze the longest
+	var weapon := 0             # what it came from (0: fists or a hazard)
+	var sweet := false          # a sweet-spot hit
 
 	func _init(m: MoveData) -> void:
 		damage = m.damage
@@ -468,10 +491,12 @@ class Hit:
 		percent = percent * Weapons.SWEET_PERCENT / 100
 		base_knockback = base_knockback * Weapons.SWEET_PERCENT / 100
 		max_hit_stop = true
+		sweet = true
 
 
 ## A fighter's move connects: fists, or a melee weapon (belan, bat, shotgun).
-static func _apply_hit(fighters: Array[Fighter], attacker: int, target: int, move: int, rules: MatchRules) -> void:
+static func _apply_hit(state: GameState, attacker: int, target: int, move: int, rules: MatchRules) -> void:
+	var fighters := state.fighters
 	var atk := fighters[attacker]
 	var def := fighters[target]
 	atk.attack_connected = true
@@ -491,7 +516,8 @@ static func _apply_hit(fighters: Array[Fighter], attacker: int, target: int, mov
 		_melee_weapon_hit(atk, def, move, hit, rules)
 	if weapon != Weapons.NONE and rules.signature_of(attacker) == weapon:
 		hit.percent = hit.percent * Weapons.SIGNATURE_PERCENT / 100
-	_land_hit(fighters, attacker, target, hit, side, true, rules)
+	hit.weapon = weapon
+	_land_hit(state, attacker, target, hit, side, true, rules)
 
 
 ## A melee weapon's sweet spot and quirks. Belan: bonking someone in the middle of their own attack
@@ -523,7 +549,8 @@ static func _melee_weapon_hit(atk: Fighter, def: Fighter, move: int, hit: Hit, r
 
 ## Applies a hit: rage, the hidden second wind, Josh, hit-stop, Guts, then knockback in direction
 ## side. Projectiles don't freeze their owner.
-static func _land_hit(fighters: Array[Fighter], attacker: int, target: int, hit: Hit, side: int, freeze_attacker: bool, rules: MatchRules) -> void:
+static func _land_hit(state: GameState, attacker: int, target: int, hit: Hit, side: int, freeze_attacker: bool, rules: MatchRules) -> void:
+	var fighters := state.fighters
 	var atk := fighters[attacker]
 	var def := fighters[target]
 
@@ -539,6 +566,15 @@ static func _land_hit(fighters: Array[Fighter], attacker: int, target: int, hit:
 	def.josh = mini(rules.max_josh, def.josh + damage - absorbed)
 	def.last_hit_by = attacker + 1
 	def.last_hit_timer = rules.ko_credit_frames
+	def.last_hit_weapon = hit.weapon
+	def.last_hit_sweet = hit.sweet
+	def.hit_count += 1
+	if attacker != target:
+		# The attacker's record with this weapon, for the winner's nickname.
+		var stats := (attacker * Weapons.COUNT + hit.weapon) * 3
+		state.weapon_stats[stats] += damage
+		if hit.sweet:
+			state.weapon_stats[stats + 2] += 1
 	if not hit.no_hit_stop:
 		var stop := rules.max_hit_stop if hit.max_hit_stop else hit_stop_frames(damage, rules)
 		if freeze_attacker:
@@ -565,13 +601,15 @@ static func _land_hit(fighters: Array[Fighter], attacker: int, target: int, hit:
 	def.grounded = false
 	def.action = A_HITSTUN
 	def.move = MoveData.Id.NONE
+	def.flurry_next = MoveData.Id.NONE
 	def.action_frame = 0
 	def.hitstun_frames = maxi(1, 8 + def.josh / 8 + hit.hitstun_bonus)
 	def.air_dodge_used = false # getting hit gives back the air dodge and the recovery
 	def.recovery_used = false
 
 
-static func _check_blast_zone(fighters: Array[Fighter], index: int, rules: MatchRules) -> void:
+static func _check_blast_zone(state: GameState, index: int, rules: MatchRules) -> void:
+	var fighters := state.fighters
 	var f := fighters[index]
 	if not f.is_active() or rules.stage.blast_zone.contains(f.pos_x, f.pos_y):
 		return
@@ -580,6 +618,7 @@ static func _check_blast_zone(fighters: Array[Fighter], index: int, rules: Match
 	f.falls += 1
 	if f.last_hit_timer > 0 and f.last_hit_by > 0 and f.last_hit_by - 1 != index:
 		fighters[f.last_hit_by - 1].kos += 1
+		state.weapon_stats[((f.last_hit_by - 1) * Weapons.COUNT + f.last_hit_weapon) * 3 + 1] += 1 # the weapon's KO
 	f.last_hit_by = 0
 	f.last_hit_timer = 0
 
@@ -619,6 +658,57 @@ static func _check_match_over(state: GameState, rules: MatchRules) -> void:
 	if alive <= 1:
 		state.match_over = true
 		state.winner_index = last if alive == 1 else -1
+
+
+## A fighter's main weapon in this match, for their nickname: [weapon, master]. The weapon (0 is
+## fists) is the one that did the most of their damage, if that is at least 40% of it; otherwise
+## -1, an all-rounder. Master: they also landed 3 or more sweet spots and a KO with it.
+static func main_weapon(state: GameState, fighter: int) -> Array:
+	var total := 0
+	var best := -1
+	var best_damage := 0
+	var from := fighter * Weapons.COUNT * 3
+	for w in Weapons.COUNT:
+		var damage := state.weapon_stats[from + w * 3]
+		total += damage
+		if damage > best_damage:
+			best = w
+			best_damage = damage
+	if best < 0 or best_damage * 100 < total * 40:
+		return [-1, false]
+	return [best, state.weapon_stats[from + best * 3 + 2] >= 3 and state.weapon_stats[from + best * 3 + 1] >= 1]
+
+
+## The stage's hazards, while active: a launch pad flings up a fighter standing in it, a pusher
+## carries everyone in it sideways, and a striker hits everyone in it every Hazards.HIT_EVERY
+## frames. A dodging fighter is untouched. Hazard hits credit nobody with a KO.
+static func _apply_hazards(state: GameState, rules: MatchRules) -> void:
+	var stage := rules.stage
+	var fighters := state.fighters
+	for k in stage.hazard_kinds.size():
+		var at := Hazards.cycle_at(state.frame, k)
+		if at < Hazards.ACTIVE_AT or at >= Hazards.COOLDOWN_AT:
+			continue
+		var zone := stage.hazard_zones[k]
+		for i in fighters.size():
+			var f := fighters[i]
+			if not f.is_active() or is_intangible(f, rules.tuning):
+				continue
+			if not zone.overlaps(hurtbox(f, rules.tuning)):
+				continue
+			match stage.hazard_kinds[k]:
+				Hazards.LAUNCH:
+					if f.grounded and f.action != A_HITSTUN:
+						f.vel_y = Hazards.LAUNCH_SPEED
+						f.grounded = false
+				Hazards.PUSH:
+					f.pos_x += Hazards.PUSH_SPEED * stage.hazard_dirs[k]
+				Hazards.HIT:
+					if (at - Hazards.ACTIVE_AT) % Hazards.HIT_EVERY != 0:
+						continue
+					var hit := Hit.new(Hazards.strike())
+					var side := 1 if f.pos_x * 2 >= zone.min_x + zone.max_x else -1
+					_land_hit(state, i, i, hit, side, false, rules)
 
 
 ## The timed match's winner: most KOs, then fewest falls. -1 if the best two are level on both.
@@ -671,6 +761,7 @@ static func _spawn(f: Fighter, index: int, rules: MatchRules) -> void:
 	f.uzi_shots = 0
 	f.uzi_streak = 0
 	f.uzi_target = 0
+	f.flurry_next = MoveData.Id.NONE
 
 
 # ---- Weapons (SimulationWeapons.cs) ---------------------------------------------------------------
@@ -968,6 +1059,7 @@ static func _shot_hit(state: GameState, index: int, target: int, rules: MatchRul
 				if shooter.uzi_streak >= Weapons.UZI_STREAK_SWEET:
 					hit.damage = 3 # keeping on target: the stream holds them
 					hit.hitstun_bonus = 0
+					hit.sweet = true
 		Weapons.SHOT_ARROW:
 			if not is_self and p.age >= Weapons.LONG_SHOT_FRAMES:
 				hit.sweeten()
@@ -977,8 +1069,9 @@ static func _shot_hit(state: GameState, index: int, target: int, rules: MatchRul
 				hit.sweeten()
 	if rules.signature_of(owner) == p.weapon:
 		hit.percent = hit.percent * Weapons.SIGNATURE_PERCENT / 100
+	hit.weapon = p.weapon
 	var side := -1 if p.vel_x < 0 else 1
-	_land_hit(fighters, owner, target, hit, side, false, rules)
+	_land_hit(state, owner, target, hit, side, false, rules)
 
 
 ## A cherry bomb bursts: a 2.4 m box that hits everyone in it, its thrower too, launching them away
@@ -1005,8 +1098,9 @@ static func _explode(state: GameState, index: int, direct: int, rules: MatchRule
 			hit.sweeten()
 		if rules.signature_of(from) == weapon:
 			hit.percent = hit.percent * Weapons.SIGNATURE_PERCENT / 100
+		hit.weapon = weapon
 		var side := 1 if def.pos_x >= px else -1
-		_land_hit(fighters, from, d, hit, side, false, rules)
+		_land_hit(state, from, d, hit, side, false, rules)
 
 
 ## Touch to take: a box or loose weapon goes to the fighter touching it (nearest its centre; on a

@@ -77,8 +77,9 @@ func press_keys(state: GameState, rules: MatchRules) -> void:
 	_wanted = SparringBot.think(state, rules, 0, P1_LEVEL)
 	for i in InputReader.BUTTONS.size():
 		var bit: int = InputReader.BUTTONS[i]
-		var down := (_wanted & bit) != 0
-		if down == ((_held & bit) != 0):
+		# A key is down when every button it stands for is wanted (the combo key is two at once).
+		var down := (_wanted & bit) == bit
+		if down == ((_held & bit) == bit):
 			continue
 		var e := InputEventKey.new()
 		e.physical_keycode = InputReader.key_for(0, i)

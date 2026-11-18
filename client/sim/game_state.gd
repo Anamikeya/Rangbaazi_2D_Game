@@ -13,6 +13,10 @@ var winner_index := -1
 var props: Array[Prop] = []
 var prop_timer := 0      # frames until the next Prop Box drops
 var last_box_weapon := 0 # the weapon the last one held
+## Each fighter's match record with each weapon (0 is fists), for the winner's nickname:
+## [fighter * Weapons.COUNT * 3 + weapon * 3 + stat], stat 0 damage dealt to others, 1 KOs,
+## 2 sweet-spot hits.
+var weapon_stats: PackedInt32Array = []
 
 
 func _init(fighter_count: int = 2, seed: int = 0) -> void:
@@ -21,6 +25,7 @@ func _init(fighter_count: int = 2, seed: int = 0) -> void:
 		fighters.append(Fighter.new())
 	for i in Weapons.MAX_PROPS:
 		props.append(Prop.new())
+	weapon_stats.resize(fighter_count * Weapons.COUNT * 3)
 
 
 func clone() -> GameState:
@@ -41,6 +46,7 @@ func copy_from(o: GameState) -> void:
 		props[i].copy_from(o.props[i])
 	prop_timer = o.prop_timer
 	last_box_weapon = o.last_box_weapon
+	weapon_stats = o.weapon_stats.duplicate()
 
 
 ## Stable 64-bit checksum, equal to the C# GameState.Checksum() for the same state.
@@ -56,4 +62,6 @@ func checksum() -> int:
 	h.add_int(last_box_weapon)
 	for p in props:
 		p.add_to(h)
+	for v in weapon_stats:
+		h.add_int(v)
 	return h.value()

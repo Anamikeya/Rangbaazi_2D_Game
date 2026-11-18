@@ -1,6 +1,9 @@
 """Copies the finished art pack into the game in a compact form.
 
-    python tools/import_art.py <art pack folder>   (e.g. .../game-art/round-brawler-v6)
+    python tools/import_art.py <art pack folder> [<delta pack folder> ...]
+    (e.g. .../game-art/round-brawler-v6 .../game-art/round-brawler-v7)
+
+A delta pack holds only the files that changed; its files win over the packs before it.
 
 Writes client/assets/:
     characters/<id>/clips.json   the rig (parts, rest poses, texture slots, springs) and the 24 own
@@ -9,9 +12,13 @@ Writes client/assets/:
                                  re-encode them: the game decodes them itself, keeping them small)
     shared/clips.json            the 18 shared moves
     arenas/<id>/arena.json       the painted layers, the three platform kinds and which platform uses
-                                 which (in the sim's platform order, see tools/gen_arena_stages.py)
+                                 which (in the sim's platform order, see tools/gen_arena_stages.py),
+                                 and the three hazards with a picture for each of their states
     arenas/<id>/*.wbin           the arena's layer and platform images
+    effects/<id>-<kind>.wbin     each fighter's hit, dodge and landing effect sprites
     index.json                   the fighters (id, name, role) and arenas (stage id, folder, name)
+
+client/assets/weapons (tools/cut_weapons.gd) is kept as it is.
 
 Clip arrays: tracks part -> [[frame, x, y, rotation, scaleX, scaleY, opacity, easing index], ...],
 textures part -> [[frame, slot], ...], order -> [[frame, [parts back to front]], ...]. Easing indexes
@@ -21,6 +28,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 
 EASINGS = ["linear", "step", "in", "out", "in_out", "out_back", "out_elastic"]
 ARENA_ID = {"shahn": "rooftops"}
@@ -108,10 +116,21 @@ def import_arena(pack, folder, out_root, level):
                         "left": copy_image(pack, piece["left"], out, used),
                         "middle": copy_image(pack, piece["middle"], out, used),
                         "right": copy_image(pack, piece["right"], out, used)}
+    # The hazards, in the layout's order (the sim's hazard order, see tools/gen_arena_stages.py):
+    # where each stands (level pixels: its middle and the platform top) and its picture per state.
+    hazards = []
+    for h in level["layouts"][0].get("hazards", []):
+        spec = (art.get("hazardArt") or {}).get(h["type"]) or {}
+        states = {}
+        for state in ("idle", "warning", "active", "cooldown"):
+            file = ((spec.get("states") or {}).get(state) or {}).get("file")
+            states[state] = copy_image(pack, file, out, used) if file else None
+        hazards.append({"type": h["type"], "label": h.get("label", ""), "x": h["x"], "y": h["y"],
+                        "w": spec.get("width", 160), "h": spec.get("height", 160), "states": states})
     ids = [p["id"] for p in level["layouts"][0]["platforms"]]
     assign = art.get("platformAssignments") or {}
     data = {"id": sid, "title": level["title"], "sky": art.get("sky", "#1a1626"), "layers": layers, "pieces": pieces,
-            "platforms": [assign.get(i, "steps") for i in ids], "platformIds": ids}
+            "platforms": [assign.get(i, "steps") for i in ids], "platformIds": ids, "hazards": hazards}
     json.dump(data, open(os.path.join(out, "arena.json"), "w", encoding="utf-8"), separators=(",", ":"))
     return sid
 
@@ -129,13 +148,32 @@ NAME_FIX = {"shahn": "Shan", "saklan": "Saqlain", "avipray": "Abhipray",
 ARENA_OWNER = {}  # arena folder -> owner's character id
 
 
+def merged(packs):
+    """One pack: as it is. A pack plus deltas: a temporary folder with the deltas laid over it."""
+    if len(packs) == 1:
+        return packs[0]
+    out = tempfile.mkdtemp(prefix="rangbaazi-pack-")
+    for pack in packs:
+        for name in ("characters", "levels", "shared", "effects"):
+            src = os.path.join(pack, name)
+            if os.path.isdir(src):
+                shutil.copytree(src, os.path.join(out, name), dirs_exist_ok=True)
+        for name in ("characters.json", "effects.json"):
+            if os.path.exists(os.path.join(pack, name)):
+                shutil.copyfile(os.path.join(pack, name), os.path.join(out, name))
+    return out
+
+
 def main():
-    pack = sys.argv[1]
+    packs = sys.argv[1:]
+    pack = merged(packs)
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     out_root = os.path.join(root, "client", "assets")
-    if os.path.exists(out_root):
-        shutil.rmtree(out_root)
-    os.makedirs(out_root)
+    os.makedirs(out_root, exist_ok=True)
+    for name in os.listdir(out_root):
+        if name != "weapons":  # cut by tools/cut_weapons.gd, not by this script
+            path = os.path.join(out_root, name)
+            shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
 
     shared = {}
     for f in sorted(os.listdir(os.path.join(pack, "shared", "anim"))):
@@ -147,7 +185,7 @@ def main():
     # The cast list (names, roles) is characters.json, in this pack or the v3 pack beside it.
     cast_file = os.path.join(pack, "characters.json")
     if not os.path.exists(cast_file):
-        cast_file = os.path.join(os.path.dirname(os.path.abspath(pack)), "round-brawler-v3", "characters.json")
+        cast_file = os.path.join(os.path.dirname(os.path.abspath(packs[0])), "round-brawler-v3", "characters.json")
     cast = json.load(open(cast_file, encoding="utf-8"))["characters"]
     fighters = []
     for c in cast:
@@ -164,10 +202,20 @@ def main():
             sid = import_arena(pack, folder, out_root, level)
             arenas.append({"id": sid, "folder": folder, "title": level["title"], "owner": ARENA_OWNER.get(folder, folder)})
 
+    # Each fighter's hit, dodge and landing effect sprites (the game animates them itself).
+    effects = os.path.join(pack, "effects")
+    if os.path.isdir(effects):
+        os.makedirs(os.path.join(out_root, "effects"))
+        for f in sorted(os.listdir(effects)):
+            if f.endswith(".webp"):
+                shutil.copyfile(os.path.join(effects, f), os.path.join(out_root, "effects", f[:-5] + ".wbin"))
+
     json.dump({"fighters": fighters, "arenas": arenas, "easings": EASINGS},
               open(os.path.join(out_root, "index.json"), "w", encoding="utf-8"), indent=1)
     total = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(out_root) for f in fs)
     print(f"{len(fighters)} fighters, {len(arenas)} arenas, {total / 1e6:.1f} MB in client/assets")
+    if pack != packs[0]:
+        shutil.rmtree(pack, ignore_errors=True)
 
 
 if __name__ == "__main__":

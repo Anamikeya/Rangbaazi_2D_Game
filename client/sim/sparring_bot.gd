@@ -26,7 +26,9 @@ const A_ATTACK := Fighter.Action.ATTACK
 const A_STUNNED := Fighter.Action.STUNNED
 
 static var JAB_RANGE := Fx.ratio(6, 5)
-static var CHASE_HEIGHT := Fx.ratio(3, 2)
+## Jump after an opponent standing this much higher or more: the height gap past which the bot no
+## longer attacks (1 m), so it never just stands under someone on a low step.
+static var CHASE_HEIGHT := Fx.ONE
 static var CHASE_DISTANCE := Fx.from_int(4)
 static var EDGE_MARGIN := Fx.ONE
 static var STOP_DISTANCE := Fx.ratio(1, 8)
@@ -125,7 +127,7 @@ static func think(state: GameState, rules: MatchRules, self_index: int, level: i
 			b |= Buttons.LEFT
 
 	# Jump after them only when they stand on a platform above.
-	if me.grounded and can_jump and op.grounded and dy > CHASE_HEIGHT and absi(dx) < CHASE_DISTANCE:
+	if me.grounded and can_jump and op.grounded and dy >= CHASE_HEIGHT and absi(dx) < CHASE_DISTANCE:
 		b |= Buttons.JUMP
 	return b
 
