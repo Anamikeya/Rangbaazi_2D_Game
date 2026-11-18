@@ -316,7 +316,8 @@ set -euo pipefail
 aws s3 cp s3://$artifactBucket/relay/Rangbaazi.Relay /opt/rangbaazi/Rangbaazi.Relay.new --region $Region --only-show-errors
 chmod 755 /opt/rangbaazi/Rangbaazi.Relay.new
 mv -f /opt/rangbaazi/Rangbaazi.Relay.new /opt/rangbaazi/Rangbaazi.Relay
-aws s3 sync s3://$artifactBucket/web/ /opt/rangbaazi/web/ --delete --region $Region --only-show-errors
+# --exact-timestamps: without it, sync skips a changed file that kept its size (a renamed fighter).
+aws s3 sync s3://$artifactBucket/web/ /opt/rangbaazi/web/ --delete --exact-timestamps --region $Region --only-show-errors
 chmod -R a+rX /opt/rangbaazi/web
 systemctl restart rangbaazi-relay
 EOS

@@ -17,6 +17,7 @@ var _dragging := false
 var _moved := 0.0
 var _slider: HSlider
 var _title: Label
+var _owner: Label
 var _pick: Button
 var _syncing := false
 var _confirm_text := "Fight here"
@@ -45,6 +46,14 @@ func _ready() -> void:
 	_title.offset_top = 90
 	_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_title)
+	_owner = Label.new()
+	_owner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_owner.add_theme_font_size_override("font_size", 36)
+	_owner.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
+	_owner.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	_owner.offset_top = 190
+	_owner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_owner)
 
 	_slider = HSlider.new()
 	_slider.min_value = 0
@@ -204,6 +213,8 @@ func _refresh() -> void:
 	_syncing = false
 	var id := current_id()
 	_title.text = ArtLibrary.arena_title(id)
+	var owner := ArtLibrary.arena_owner(id)
+	_owner.text = "%s's arena" % ArtLibrary.fighter_name(owner) if owner != "" else ""
 	_pick.text = _confirm_text
 
 

@@ -47,6 +47,14 @@ static func fighter_role(id: String) -> String:
 	return ""
 
 
+## The character id of the fighter an arena belongs to, or "".
+static func arena_owner(id: String) -> String:
+	for a: Dictionary in arenas():
+		if a["id"] == id:
+			return str(a.get("owner", a.get("folder", "")))
+	return ""
+
+
 static func arena_title(id: String) -> String:
 	for a: Dictionary in arenas():
 		if a["id"] == id:

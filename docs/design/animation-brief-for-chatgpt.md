@@ -328,12 +328,21 @@ Paste this into the Gemini conversation that finished round-brawler-v6.
 >
 > Shan's and the Portal Ghost's (`akmal`) jab and four heavies have identical key-frame timing. Give the Portal Ghost its own drifting, floaty rhythm without changing its poses.
 >
-> ### 6. Names: four spellings and one swap
+> ### 6. Names and two arena owners
 >
-> - Correct spellings: **Shan** (not Shahn), **Saqlain** (not Saklan), **Abhipray** (not Avipray) and **Aastha** (not Artha).
-> - Simran and Akhmal swap names: the Portal Ghost (id `akmal`) is now **Simran**, and the cat Disc Duelist (id `simran`) is now **Akhmal**. Each keeps its own look, moves and arena: Portal Playground stays with the Portal Ghost and Steel Courtyard with the cat.
+> - Correct spellings: **Shan** (not Shahn), **Saqlain** (not Saklan) and **Abhipray** (not Avipray).
+> - Four fighters have new names. Each keeps its own look and moves:
 >
-> Fix every name a player can see: the `name` in `characters.json`, review sheets, labels and any text drawn into the art. Keep the folder names and ids (`shahn`, `saklan`, `avipray`, `akmal`, `artha`, `simran`) exactly as they are, because the game finds the files by them.
+>   | Look (id) | Name now |
+>   |---|---|
+>   | Portal Ghost (`akmal`) | **Simran** |
+>   | cat Disc Duelist (`simran`) | **Aastha** |
+>   | Slime Trickster (`chandan`) | **Akhmal** |
+>   | Precision Ace (`artha`) | **Chandan** |
+>
+> - Two arenas change owner. Akhmal (the Slime Trickster) now owns **Steel Courtyard** (`levels/simran`), and Aastha (the cat) now owns **Slimeworks** (`levels/chandan`). Keep both arenas' art and layouts. Change only the owner in labels, review sheets and any owner text. Portal Playground stays the Portal Ghost's (Simran's), and Sightline City the Precision Ace's (Chandan's).
+>
+> Fix every name a player can see: the `name` in `characters.json`, review sheets, labels and any text drawn into the art. Keep the folder names and ids (`shahn`, `saklan`, `avipray`, `akmal`, `artha`, `simran`, `chandan`) exactly as they are, because the game finds the files by them.
 >
 > Report honestly as before: what a script counted and what you looked at, in separate columns.
 

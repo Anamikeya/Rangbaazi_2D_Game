@@ -116,10 +116,16 @@ def import_arena(pack, folder, out_root, level):
     return sid
 
 
-# Names the user corrected, by id (the ids and art folders keep the packs' spelling). The Portal
-# Ghost (id "akmal") is Simran and the cat Disc Duelist (id "simran") is Akhmal; each keeps its arena.
-NAME_FIX = {"shahn": "Shan", "saklan": "Saqlain", "avipray": "Abhipray", "artha": "Aastha",
-            "akmal": "Simran", "simran": "Akhmal"}
+# Names the user set, by id (the ids and art folders keep the packs' spelling):
+#   the Portal Ghost (id "akmal") is Simran, the cat Disc Duelist (id "simran") is Aastha,
+#   the Slime Trickster (id "chandan") is Akhmal, the Precision Ace (id "artha") is Chandan.
+NAME_FIX = {"shahn": "Shan", "saklan": "Saqlain", "avipray": "Abhipray",
+            "akmal": "Simran", "simran": "Aastha",
+            "chandan": "Akhmal", "artha": "Chandan"}
+
+# Each arena belongs to the fighter whose folder it shares, except where the user moved one:
+# Akhmal (the Slime Trickster) owns Steel Courtyard, and Aastha (the cat) owns Slimeworks.
+ARENA_OWNER = {"simran": "chandan", "chandan": "simran"}  # arena folder -> owner's character id
 
 
 def main():
@@ -155,7 +161,7 @@ def main():
         if os.path.exists(lp) and os.path.exists(os.path.join(pack, "levels", folder, "arena-art.json")):
             level = json.load(open(lp, encoding="utf-8"))
             sid = import_arena(pack, folder, out_root, level)
-            arenas.append({"id": sid, "folder": folder, "title": level["title"]})
+            arenas.append({"id": sid, "folder": folder, "title": level["title"], "owner": ARENA_OWNER.get(folder, folder)})
 
     json.dump({"fighters": fighters, "arenas": arenas, "easings": EASINGS},
               open(os.path.join(out_root, "index.json"), "w", encoding="utf-8"), indent=1)
