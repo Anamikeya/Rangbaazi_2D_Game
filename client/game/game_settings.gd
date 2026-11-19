@@ -78,6 +78,9 @@ static func apply() -> void:
 
 ## Makes the Music and Effects buses (once) and sets their volumes.
 static func apply_audio() -> void:
+	# The buses come from res://default_bus_layout.tres. Adding them here at run time is only a
+	# fallback: on the web, Godot wires a bus added at run time into a loop with Master, and the
+	# browser silences every sound that goes through a loop.
 	for bus in ["Music", "Effects"]:
 		if AudioServer.get_bus_index(bus) < 0:
 			AudioServer.add_bus()

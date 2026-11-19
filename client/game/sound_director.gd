@@ -56,6 +56,7 @@ func set_scene(scene: String) -> void:
 	_loop(_music, "res://audio/music/%s.wav" % folder)
 	if scene == "menu":
 		_ambience.stop()
+		_ambience.set_meta("loop", false)
 	else:
 		_loop(_ambience, "res://audio/ambience/%s.wav" % folder)
 	_music.volume_db = -6.0 if scene == "menu" else 0.0
@@ -65,10 +66,20 @@ func _loop(player: AudioStreamPlayer, path: String) -> void:
 	var stream := _stream(path)
 	if stream == null:
 		player.stop()
+		player.set_meta("loop", false)
 		return
+	player.set_meta("loop", true)
 	if player.stream != stream or not player.playing:
 		player.stream = stream
 		player.play()
+
+
+## On the web, Godot plays sounds as browser samples and the music and ambience don't loop there
+## (the track plays once, then silence), so a loop that has stopped is started again here.
+func _process(_delta: float) -> void:
+	for player in [_music, _ambience]:
+		if player != null and player.stream != null and bool(player.get_meta("loop", false)) and not player.playing:
+			player.play()
 
 
 ## A one-shot sound effect (client/audio/sfx/<name>.wav).
