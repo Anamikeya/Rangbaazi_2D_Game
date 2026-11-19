@@ -25,6 +25,12 @@ const WEAPON_CLIPS := {
 	MoveData.Id.UZI_FIRE: ["jab", 4], MoveData.Id.BOMB_LOB: ["neutral_heavy", 14],
 	MoveData.Id.BOW_SHOT: ["jab", 4], MoveData.Id.WEAPON_THROW: ["jab", 4],
 }
+## Standing still (and posing in the fighter picker), the pack holds the fists up at eye height,
+## where beside a round head they read as eyebrows. In these clips a fist stays at least
+## GUARD_BELOW art pixels below the middle of the head, keeping GUARD_KEEP of any rise above that.
+const GUARD_CLIPS := ["idle", "idle_fidget_a", "idle_fidget_b", "select_pose"]
+const GUARD_BELOW := 30.0
+const GUARD_KEEP := 0.15
 const FIDGET_AFTER := 300 # frames standing still before an idle fidget
 const HARD_LANDING := 0.22 # metres per frame of fall speed
 
@@ -214,9 +220,14 @@ func draw(canvas: CanvasItem, feet: Vector2, px: float, facing: int, clip_name: 
 	var clip := ArtLibrary.clip(character_id, clip_name)
 	if clip.is_empty():
 		clip = ArtLibrary.clip(character_id, "idle")
+		clip_name = "idle"
 	var d := maxi(1, int(clip.get("d", 1)))
 	var f := frame % d if bool(clip.get("loop", false)) else clampi(frame, 0, d - 1)
 	var parts: Dictionary = _rig["parts"]
+	var guard := GUARD_CLIPS.has(clip_name)
+	var guard_y := 0.0
+	if guard:
+		guard_y = float(_sample(clip, "head", f, parts.get("head", {}))[1]) + GUARD_BELOW
 	var order := _draw_order(clip, f, parts)
 	var base := Transform2D(0.0, Vector2(px * facing, px), 0.0, feet)
 	var world: Dictionary = {}
@@ -225,6 +236,8 @@ func draw(canvas: CanvasItem, feet: Vector2, px: float, facing: int, clip_name: 
 		if spec.is_empty():
 			continue
 		var pose := _sample(clip, part, f, spec)
+		if guard and (part == "frontHand" or part == "backHand") and pose[1] < guard_y:
+			pose[1] = guard_y + (pose[1] - guard_y) * GUARD_KEEP
 		var local := Transform2D(pose[2] + _spring_angle(part), Vector2(pose[3], pose[4]), 0.0, Vector2(pose[0], pose[1]))
 		var parent := str(spec.get("parent", ""))
 		var m: Transform2D = (world[parent] if world.has(parent) else _part_transform(clip, parent, f, parts)) * local if parent != "" else local
