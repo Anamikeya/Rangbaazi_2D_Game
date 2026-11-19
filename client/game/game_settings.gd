@@ -5,6 +5,7 @@ extends RefCounted
 
 const PATH := "user://settings.cfg"
 const FPS_CHOICES := [60, 30]
+const SETTINGS_VERSION := 2
 
 static var player_name := ""
 ## The fighter picked in the character circle (one of the 31 ids), and the arena for practice.
@@ -42,6 +43,9 @@ static func load_settings() -> void:
 		max_fps = 60
 	effects = bool(cfg.get_value("graphics", "effects", true))
 	show_hitboxes = bool(cfg.get_value("graphics", "show_hitboxes", false))
+	# Settings saved before version 2 had the debug hitboxes on by default: turn them off once.
+	if int(cfg.get_value("player", "settings_version", 1)) < SETTINGS_VERSION:
+		show_hitboxes = false
 	follow_camera = bool(cfg.get_value("graphics", "follow_camera", true))
 	seen_help = bool(cfg.get_value("player", "seen_help", false))
 	show_debug = bool(cfg.get_value("graphics", "show_debug", false))
@@ -57,6 +61,7 @@ static func save() -> void:
 	cfg.set_value("graphics", "max_fps", max_fps)
 	cfg.set_value("graphics", "effects", effects)
 	cfg.set_value("graphics", "show_hitboxes", show_hitboxes)
+	cfg.set_value("player", "settings_version", SETTINGS_VERSION)
 	cfg.set_value("graphics", "follow_camera", follow_camera)
 	cfg.set_value("player", "seen_help", seen_help)
 	cfg.set_value("graphics", "show_debug", show_debug)

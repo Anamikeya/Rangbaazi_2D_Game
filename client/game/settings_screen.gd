@@ -1,15 +1,18 @@
 class_name SettingsScreen
 extends Control
-## Settings: frame rate, effects, hitboxes and the debug line. Each button toggles one option and
-## saves at once (GameSettings).
+## Settings: the two volume sliders, then one row per option with every choice in view (ChoiceRow):
+## the camera, the frame rate, hit shake, hitboxes and the debug line. A tap picks and saves at
+## once (GameSettings); nothing cycles and nothing opens.
 
 signal closed
 
-var _fps: Button
-var _effects: Button
-var _hitboxes: Button
-var _camera: Button
-var _debug: Button
+var _camera: ChoiceRow
+var _fps: ChoiceRow
+var _effects: ChoiceRow
+var _hitboxes: ChoiceRow
+var _debug: ChoiceRow
+
+const ON_OFF := ["On", "Off"]
 
 
 func _ready() -> void:
@@ -23,14 +26,14 @@ func _ready() -> void:
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(center)
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 22)
-	column.custom_minimum_size = Vector2(760, 0)
+	column.add_theme_constant_override("separation", 16)
+	column.custom_minimum_size = Vector2(1180, 0)
 	center.add_child(column)
 
 	var title := Label.new()
 	title.text = "Settings"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 72)
+	title.add_theme_font_size_override("font_size", 64)
 	title.add_theme_color_override("font_color", UiTheme.ACCENT)
 	column.add_child(title)
 
@@ -39,25 +42,17 @@ func _ready() -> void:
 	_volume_slider(column, "Effects", func() -> float: return GameSettings.effects_volume,
 		func(v: float) -> void: GameSettings.effects_volume = v)
 
-	_fps = _toggle(column, func() -> void:
-		var i := GameSettings.FPS_CHOICES.find(GameSettings.max_fps)
-		GameSettings.max_fps = GameSettings.FPS_CHOICES[(i + 1) % GameSettings.FPS_CHOICES.size()])
-	_camera = _toggle(column, func() -> void: GameSettings.follow_camera = not GameSettings.follow_camera)
-	_effects = _toggle(column, func() -> void: GameSettings.effects = not GameSettings.effects)
-	_hitboxes = _toggle(column, func() -> void: GameSettings.show_hitboxes = not GameSettings.show_hitboxes)
-	_debug = _toggle(column, func() -> void: GameSettings.show_debug = not GameSettings.show_debug)
-
-	var note := Label.new()
-	note.text = "The match always runs at 60 frames a second; 30 only draws fewer, to save battery."
-	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	note.add_theme_font_size_override("font_size", 24)
-	note.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
-	column.add_child(note)
+	_camera = _row(column, "Camera", ["Follows the fight", "Whole arena"], func(i: int) -> void:
+		GameSettings.follow_camera = i == 0)
+	_fps = _row(column, "Frame rate", ["60", "30 (saves battery)"], func(i: int) -> void:
+		GameSettings.max_fps = GameSettings.FPS_CHOICES[i])
+	_effects = _row(column, "Hit shake", ON_OFF, func(i: int) -> void: GameSettings.effects = i == 0)
+	_hitboxes = _row(column, "Show hitboxes", ON_OFF, func(i: int) -> void: GameSettings.show_hitboxes = i == 0)
+	_debug = _row(column, "Debug info", ON_OFF, func(i: int) -> void: GameSettings.show_debug = i == 0)
 
 	var back := Button.new()
-	back.text = "Back"
-	back.custom_minimum_size = Vector2(0, 110)
+	back.text = "Done"
+	back.custom_minimum_size = Vector2(0, 104)
 	back.add_theme_font_size_override("font_size", 44)
 	back.pressed.connect(func() -> void:
 		hide()
@@ -71,14 +66,24 @@ func open() -> void:
 	show()
 
 
+## One option: its name, and a chip for each choice. Picking saves and applies at once.
+func _row(parent: Control, title: String, options: Array, change: Callable) -> ChoiceRow:
+	var row := ChoiceRow.make(title, options, 0, func(i: int) -> void:
+		change.call(i)
+		GameSettings.save()
+		GameSettings.apply())
+	parent.add_child(row)
+	return row
+
+
 ## A labelled volume slider, 0 to 100%; it saves and takes effect as it moves.
 func _volume_slider(parent: Control, title: String, getter: Callable, setter: Callable) -> void:
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 24)
+	row.add_theme_constant_override("separation", 14)
 	parent.add_child(row)
 	var label := Label.new()
-	label.custom_minimum_size = Vector2(300, 0)
-	label.add_theme_font_size_override("font_size", 38)
+	label.custom_minimum_size = Vector2(420, 0)
+	label.add_theme_font_size_override("font_size", 36)
 	row.add_child(label)
 	var slider := HSlider.new()
 	slider.min_value = 0
@@ -86,7 +91,7 @@ func _volume_slider(parent: Control, title: String, getter: Callable, setter: Ca
 	slider.step = 5
 	slider.value = roundf(float(getter.call()) * 100.0)
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	slider.custom_minimum_size = Vector2(0, 80)
+	slider.custom_minimum_size = Vector2(0, 76)
 	slider.focus_mode = Control.FOCUS_NONE
 	label.text = "%s  %d%%" % [title, int(slider.value)]
 	slider.value_changed.connect(func(v: float) -> void:
@@ -97,24 +102,11 @@ func _volume_slider(parent: Control, title: String, getter: Callable, setter: Ca
 	row.add_child(slider)
 
 
-func _toggle(parent: Control, change: Callable) -> Button:
-	var b := Button.new()
-	b.custom_minimum_size = Vector2(0, 110)
-	b.add_theme_font_size_override("font_size", 40)
-	b.pressed.connect(func() -> void:
-		change.call()
-		GameSettings.save()
-		GameSettings.apply()
-		_refresh())
-	parent.add_child(b)
-	return b
-
-
 func _refresh() -> void:
 	if _fps == null:
 		return
-	_fps.text = "Frame rate: %d fps" % GameSettings.max_fps
-	_camera.text = "Camera: %s" % ("follows the fight" if GameSettings.follow_camera else "whole arena")
-	_effects.text = "Effects (hit shake): %s" % ("on" if GameSettings.effects else "off")
-	_hitboxes.text = "Show hitboxes: %s" % ("on" if GameSettings.show_hitboxes else "off")
-	_debug.text = "Debug info: %s" % ("on" if GameSettings.show_debug else "off")
+	_camera.select(0 if GameSettings.follow_camera else 1)
+	_fps.select(maxi(0, GameSettings.FPS_CHOICES.find(GameSettings.max_fps)))
+	_effects.select(0 if GameSettings.effects else 1)
+	_hitboxes.select(0 if GameSettings.show_hitboxes else 1)
+	_debug.select(0 if GameSettings.show_debug else 1)

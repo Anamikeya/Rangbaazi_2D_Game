@@ -280,7 +280,7 @@ func _draw() -> void:
 		var ring := ARMED_RING if armed and (button == Buttons.LIGHT or button == Buttons.DROP_WEAPON) else RING
 		draw_circle(center, radius, Color(ring, ring.a * dim), false, 4.0, true)
 		var text: String = "Combo" if combo else PAD_BUTTONS[i][1]
-		var font_size := int(radius * 0.34)
+		var font_size := maxi(30, int(radius * 0.34)) # the small button's label stays readable
 		var text_y := font_size * 0.35
 		if armed and button == Buttons.LIGHT:
 			# The weapon in hand, and what the button does with it.

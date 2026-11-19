@@ -378,6 +378,12 @@ func _draw_player_box(font: Font, box: Rect2, k: float, i: int, f: Fighter, kill
 	draw_style_box(_box_style(i), box)
 	var left := box.position.x + 24.0 * k
 	var right := box.end.x - 18.0 * k
+	# The fighter's face at the left of the box, so you know which box is whose at a glance.
+	var painter := _painter(i)
+	if painter != null:
+		var out_now := f.action == Fighter.Action.ELIMINATED
+		painter.draw(self, Vector2(box.position.x + 62.0 * k, box.end.y - 12.0 * k), 0.36 * k, 1, "idle", 30, 0.35 if out_now else 1.0)
+		left = box.position.x + 118.0 * k
 	var top_line := box.position.y + 44.0 * k
 	var low_line := box.position.y + 90.0 * k
 
@@ -401,7 +407,19 @@ func _draw_player_box(font: Font, box: Rect2, k: float, i: int, f: Fighter, kill
 	x += 24.0 * k * rules.stocks + 12.0 * k
 	if kills >= 0:
 		draw_string(font, Vector2(x, low_line), "KO %d" % kills, HORIZONTAL_ALIGNMENT_LEFT, -1, int(26 * k), Color.WHITE)
-	if rules.guts:
+	if f.weapon != Weapons.NONE and f.is_active():
+		# Armed: the weapon and what is left in it, where Guts would be.
+		var tex := ArtLibrary.weapon_texture(f.weapon)
+		var supply := "" if f.weapon == Weapons.BOWLING_BALL else str(f.weapon_supply)
+		var supply_size := int(28 * k)
+		var supply_width := font.get_string_size(supply, HORIZONTAL_ALIGNMENT_LEFT, -1, supply_size).x
+		draw_string(font, Vector2(right - supply_width, low_line), supply, HORIZONTAL_ALIGNMENT_LEFT, -1, supply_size, GOLD)
+		if tex != null:
+			var icon_h := 34.0 * k
+			var icon_w := minf(64.0 * k, icon_h * tex.get_width() / maxf(1.0, tex.get_height()))
+			icon_h = icon_w * tex.get_height() / maxf(1.0, tex.get_width())
+			draw_texture_rect(tex, Rect2(right - supply_width - icon_w - 8.0 * k, low_line - icon_h + 4.0 * k, icon_w, icon_h), false)
+	elif rules.guts:
 		var guts := "GUTS..." if f.guts_timer > 0 else "GUTS used" if f.guts_used else "GUTS"
 		var guts_color := DIM if f.guts_used and f.guts_timer == 0 else GOLD
 		var guts_size := int(20 * k)

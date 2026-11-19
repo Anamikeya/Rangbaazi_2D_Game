@@ -17,6 +17,7 @@ static func build() -> Theme:
 	theme.set_stylebox("normal", "Button", _box(PANEL, ACCENT.darkened(0.25)))
 	theme.set_stylebox("hover", "Button", _box(PANEL.lightened(0.12), ACCENT))
 	theme.set_stylebox("pressed", "Button", _box(ACCENT, ACCENT.lightened(0.2)))
+	theme.set_stylebox("hover_pressed", "Button", _box(ACCENT.lightened(0.1), ACCENT.lightened(0.3))) # a lit chip under the pointer
 	theme.set_stylebox("disabled", "Button", _box(Color(PANEL, 0.6), Color(1, 1, 1, 0.15)))
 	theme.set_stylebox("focus", "Button", _box(Color(0, 0, 0, 0), Color.WHITE, 4))
 	theme.set_color("font_color", "Button", TEXT)
@@ -68,6 +69,29 @@ static func panel_box() -> StyleBoxFlat:
 	var box := _box(PANEL, ACCENT.darkened(0.25))
 	box.set_content_margin_all(40)
 	return box
+
+
+## The box behind a group of controls on a screen (the menu's fighter card).
+static func card_box() -> StyleBoxFlat:
+	var box := _box(Color(0.1, 0.095, 0.13, 0.86), Color(1, 1, 1, 0.14), 2)
+	box.set_content_margin_all(22)
+	return box
+
+
+## A filled button for the one thing a screen most wants pressed. `shade` lightens (above 0) or
+## darkens it for the hover and pressed states.
+static func primary_box(shade: float) -> StyleBoxFlat:
+	var fill := ACCENT.lightened(shade) if shade >= 0.0 else ACCENT.darkened(-shade)
+	return _box(fill, fill.lightened(0.25))
+
+
+## Makes a button the screen's main action: filled with the accent colour, dark type.
+static func make_primary(button: Button) -> void:
+	button.add_theme_stylebox_override("normal", primary_box(0.0))
+	button.add_theme_stylebox_override("hover", primary_box(0.12))
+	button.add_theme_stylebox_override("pressed", primary_box(-0.15))
+	for state in ["font_color", "font_hover_color", "font_focus_color", "font_pressed_color"]:
+		button.add_theme_color_override(state, Color("1b1a22"))
 
 
 ## A rounded box with a border, padded so text has room.

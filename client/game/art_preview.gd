@@ -7,6 +7,10 @@ signal pressed
 
 var arena_id := ""
 var fighter_id := ""
+## The fighter's move to loop ("idle", or "select_pose" where the fighter is the star).
+var clip := "idle"
+## Off: no dark box or border, so the picture stands straight on whatever is behind it.
+var framed := true
 var _painter: FighterPainter
 var _painter_id := ""
 var _frame := 0
@@ -31,7 +35,8 @@ func _gui_input(event: InputEvent) -> void:
 
 func _draw() -> void:
 	var r := Rect2(Vector2.ZERO, size)
-	draw_rect(r, Color(0.05, 0.045, 0.07, 0.9))
+	if framed:
+		draw_rect(r, Color(0.05, 0.045, 0.07, 0.9))
 	if arena_id != "":
 		draw_rect(r, Color(str(ArtLibrary.arena(arena_id).get("sky", "#1a1626"))))
 		for layer: Dictionary in ArtLibrary.arena(arena_id).get("layers", []):
@@ -46,5 +51,6 @@ func _draw() -> void:
 		draw_set_transform(Vector2(size.x / 2, size.y * 0.92), 0.0, Vector2(1, 0.3))
 		draw_circle(Vector2.ZERO, size.x * 0.3, Color(UiTheme.ACCENT, 0.4))
 		draw_set_transform_matrix(Transform2D.IDENTITY)
-		_painter.draw(self, Vector2(size.x / 2, size.y * 0.92), size.y / 300.0, 1, "idle", _frame)
-	draw_rect(r, Color(UiTheme.ACCENT, 0.8), false, 4.0)
+		_painter.draw(self, Vector2(size.x / 2, size.y * 0.92), size.y / 300.0, 1, clip, _frame)
+	if framed:
+		draw_rect(r, Color(UiTheme.ACCENT, 0.8), false, 4.0)

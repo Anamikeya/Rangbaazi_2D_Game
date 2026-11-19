@@ -62,6 +62,7 @@ func _ready() -> void:
 	left.pressed.connect(func() -> void: step(-1))
 	bottom.add_child(left)
 	_pick = _button("Fight as ...", 520)
+	UiTheme.make_primary(_pick)
 	_pick.pressed.connect(func() -> void: chosen.emit(front_id()))
 	bottom.add_child(_pick)
 	var right := _button(">", 130)

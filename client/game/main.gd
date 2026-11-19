@@ -96,13 +96,17 @@ var _copy_button: Button
 
 # The panel the menu button opens (its own CanvasLayer, over the touch controls).
 var _panel_layer: CanvasLayer
+var _menu_backdrop: MatchRules
+var _menu_backdrop_for := ""
 # The how-to-play card (its own CanvasLayer, over everything in a match).
 var _help_layer: CanvasLayer
 var _help_controls: Label
 var _panel_title: Label
 var _panel_note: Label
 var _restart_button: Button
-var _level_button: Button
+# Practice options in the panel, every choice in view: who player 2 is, and how good the CPU is.
+var _p2_row: ChoiceRow
+var _level_row: ChoiceRow
 var _rematch_button: Button
 
 
@@ -307,7 +311,7 @@ func _build_panel() -> void:
 	center.add_child(box)
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 20)
-	column.custom_minimum_size = Vector2(560, 0)
+	column.custom_minimum_size = Vector2(820, 0)
 	box.add_child(column)
 
 	_panel_title = Label.new()
@@ -323,14 +327,21 @@ func _build_panel() -> void:
 	_panel_note.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
 	column.add_child(_panel_note)
 
-	_panel_button(column, "Resume", _close_panel)
+	UiTheme.make_primary(_panel_button(column, "Resume", _close_panel))
 	_panel_button(column, "How to play", func() -> void:
 		_close_panel()
 		_open_help())
 	_restart_button = _panel_button(column, "Restart", func() -> void:
 		_restart_practice()
 		_close_panel())
-	_level_button = _panel_button(column, "CPU: Normal", _on_level_pressed)
+	_p2_row = ChoiceRow.make("Player 2", ["CPU", "A friend"], 0, func(i: int) -> void:
+		_p2_cpu = i == 0
+		_refresh(), 230.0, 100.0)
+	column.add_child(_p2_row)
+	_level_row = ChoiceRow.make("CPU skill", LEVEL_NAMES, 1, func(i: int) -> void:
+		_cpu_level = i
+		_refresh(), 230.0, 100.0)
+	column.add_child(_level_row)
 	_rematch_button = _panel_button(column, "Rematch", func() -> void:
 		_on_rematch()
 		_close_panel())
@@ -393,6 +404,7 @@ func _build_help() -> void:
 	_help_controls.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
 	column.add_child(_help_controls)
 	var ok := _hud_button(column, "Got it", _close_help)
+	UiTheme.make_primary(ok)
 	ok.custom_minimum_size = Vector2(0, 110)
 	ok.add_theme_font_size_override("font_size", 44)
 
@@ -1122,7 +1134,7 @@ func _refresh() -> void:
 	match _mode:
 		Mode.MENU:
 			_arena.state = null
-			_arena.rules = _rules
+			_arena.rules = _menu_rules()
 		Mode.PRACTICE:
 			_refresh_practice()
 		Mode.ONLINE:
@@ -1151,6 +1163,17 @@ func _refresh() -> void:
 	_refresh_panel()
 	_sync_web_copy()
 	_arena.queue_redraw()
+
+
+## Behind the menu: the arena picked for practice, in its art (no match, so it just stands there).
+func _menu_rules() -> MatchRules:
+	if _menu_backdrop == null or _menu_backdrop_for != GameSettings.arena:
+		_menu_backdrop_for = GameSettings.arena
+		var stage := StageDefinition.by_id(GameSettings.arena) if _smoke == null else null
+		_menu_backdrop = MatchRules.new()
+		if stage != null:
+			_menu_backdrop.stage = stage
+	return _menu_backdrop
 
 
 ## The music and ambience for where we are, and the match's sounds (SoundDirector reads the state).
@@ -1216,8 +1239,10 @@ func _refresh_panel() -> void:
 	_panel_title.text = "Paused" if practice else "Menu"
 	_panel_note.visible = not practice
 	_restart_button.visible = practice
-	_level_button.visible = practice
-	_level_button.text = "CPU: %s" % LEVEL_NAMES[_cpu_level] if _p2_cpu else "P2: person (tap for CPU)"
+	_p2_row.visible = practice
+	_p2_row.select(0 if _p2_cpu else 1)
+	_level_row.visible = practice and _p2_cpu
+	_level_row.select(_cpu_level)
 	_rematch_button.visible = _mode == Mode.ONLINE and _can_rematch()
 	_end_match_button.visible = _mode == Mode.ROOM and _room_session != null and _room_session.is_host() \
 		and _room_session.phase == RoomSession.Phase.PLAYING
@@ -1231,7 +1256,9 @@ func _refresh_practice() -> void:
 	for i in PLAYERS:
 		var cpu := i == 1 and _p2_cpu
 		var you := i == 0 and _p2_cpu # with two people at one keyboard, nobody is "you"
-		names.append("P%d%s" % [i + 1, " CPU" if cpu else " YOU" if you else ""])
+		# The fighter's own name on its box; the tag over its head says which is you.
+		var who := GameSettings.character if i == 0 else _cpu_character
+		names.append(ArtLibrary.fighter_name(who) if _smoke == null and who != "" else "P%d%s" % [i + 1, " CPU" if cpu else " YOU" if you else ""])
 		tags.append("CPU" if cpu else "YOU" if you else "")
 	_arena.names = names
 	_arena.tags = tags

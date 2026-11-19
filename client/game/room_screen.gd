@@ -61,7 +61,15 @@ func _ready() -> void:
 	left.add_child(_share)
 	_players = _label("", 30, UiTheme.TEXT, HORIZONTAL_ALIGNMENT_LEFT)
 	left.add_child(_players)
+	# Leaving sits small in the bottom corner, away from everything you'd tap on purpose.
+	var push_down := Control.new()
+	push_down.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	push_down.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	left.add_child(push_down)
 	var leave := _button("Leave room")
+	leave.custom_minimum_size = Vector2(320, 84)
+	leave.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	leave.add_theme_font_size_override("font_size", 32)
 	leave.pressed.connect(func() -> void: leave_pressed.emit())
 	left.add_child(leave)
 
@@ -113,6 +121,7 @@ func _ready() -> void:
 		bots_changed.emit(v))
 	_host_box.add_child(_bots_slider)
 	var start := _button("START MATCH")
+	UiTheme.make_primary(start)
 	start.custom_minimum_size = Vector2(0, 120)
 	start.add_theme_font_size_override("font_size", 48)
 	start.pressed.connect(func() -> void: start_pressed.emit())
