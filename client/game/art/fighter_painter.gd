@@ -29,6 +29,10 @@ const WEAPON_CLIPS := {
 ## where beside a round head they read as eyebrows. In these clips a fist stays at least
 ## GUARD_BELOW art pixels below the middle of the head, keeping GUARD_KEEP of any rise above that.
 const GUARD_CLIPS := ["idle", "idle_fidget_a", "idle_fidget_b", "select_pose"]
+## The art pack's other faces (smug, happy, effort, hurt, dizzy) are each fighter's own face with a
+## stock expression pasted on top: a second pair of eyes or brows and a second mouth. Until the
+## pack redraws them, every clip shows the fighter's own face. Set true to use the pack's faces.
+const PACK_FACES := false
 const GUARD_BELOW := 30.0
 const GUARD_KEEP := 0.15
 const FIDGET_AFTER := 300 # frames standing still before an idle fidget
@@ -247,6 +251,8 @@ func draw(canvas: CanvasItem, feet: Vector2, px: float, facing: int, clip_name: 
 			hand_valid = true
 		var slot := _slot(clip, part, f, spec)
 		var textures: Dictionary = spec.get("textures", {})
+		if part == "head" and not PACK_FACES:
+			slot = "" # the head's own face, below
 		if not textures.has(slot):
 			slot = str(spec.get("texture", "normal"))
 		var file: Variant = textures.get(slot, null)
