@@ -96,6 +96,12 @@ func _ready() -> void:
 	settings.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	settings.pressed.connect(func() -> void: settings_requested.emit())
 	top.add_child(settings)
+	if UiTheme.can_quit():
+		var quit := UiTheme.quit_button()
+		quit.custom_minimum_size = Vector2(300, 96)
+		quit.add_theme_font_size_override("font_size", 32)
+		quit.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		top.add_child(quit)
 
 	var main := HBoxContainer.new()
 	main.add_theme_constant_override("separation", 50)

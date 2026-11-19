@@ -10,7 +10,9 @@ them from identical exact ratios:
     client/sim/arena_stages.gd
 
 Conversion: 40 px per metre, x from the centre (640 px), y up from the floor's top (650 px). Every
-arena gets the same eight spawn points on the floor and a blast zone 10 m beyond the 32 m stage.
+arena gets the same eight spawn points on the floor and the same blast zone. Its sides are 1.2 m
+past the 32 m stage, which is all the screen ever shows: a fighter whose body has gone off the
+side of the screen by its own width is out (as in Chaos Faction). Its top and bottom are far off.
 Shan's arena keeps the id "rooftops" (Stages.Rooftops). Re-run after the art pack's level layouts
 change; the golden traces only use "rooftops", whose numbers this must not change.
 
@@ -29,7 +31,8 @@ CENTRE_X = 640
 FLOOR_Y = 650
 SPAWNS = [-11, 11, -4, 4, -8, 8, -1, 1]
 SPAWN_Y = 2
-BLAST = (-26, -10, 26, 22)
+# (numerator, denominator) metres: left, bottom, right, top. 86/5 = 17.2 = 16 + 0.4 (half a body) + 0.8.
+BLAST = ((-86, 5), (-10, 1), (86, 5), (22, 1))
 ID_FOR = {"shahn": "rooftops"}
 HAZARD_HEIGHT = 2  # metres above the platform top
 LAUNCH = {"spring", "bounce", "beatPad", "launcher", "seesaw", "lift", "steam", "hay", "swing", "portal", "bridge"}
@@ -103,7 +106,7 @@ def main():
     for x in SPAWNS:
         c.append(f"        new FixVec2(Fix.FromInt({x}), Fix.FromInt({SPAWN_Y})),")
     c += ["    };", "",
-          f"    private static readonly FixRect Blast = new(Fix.FromInt({BLAST[0]}), Fix.FromInt({BLAST[1]}), Fix.FromInt({BLAST[2]}), Fix.FromInt({BLAST[3]}));", "",
+          f"    private static readonly FixRect Blast = new({cs(BLAST[0])}, {cs(BLAST[1])}, {cs(BLAST[2])}, {cs(BLAST[3])});", "",
           "    /// <summary>Every arena stage, in a fixed order (by art folder name).</summary>",
           "    public static readonly IReadOnlyList<StageDefinition> All = new[]", "    {"]
     for sid, folder, title, rs, hs in arenas:
@@ -153,7 +156,7 @@ def main():
           "\tfor h: Array in hazards:", "\t\ts.hazard_kinds.append(h[0])", "\t\ts.hazard_zones.append(h[1])", "\t\ts.hazard_dirs.append(h[2])",
           "\ts.spawn_x = PackedInt64Array([" + ", ".join(f"Fx.from_int({x})" for x in SPAWNS) + "])",
           "\ts.spawn_y = PackedInt64Array([" + ", ".join(f"Fx.from_int({SPAWN_Y})" for _ in SPAWNS) + "])",
-          f"\ts.blast_zone = FxRect.new(Fx.from_int({BLAST[0]}), Fx.from_int({BLAST[1]}), Fx.from_int({BLAST[2]}), Fx.from_int({BLAST[3]}))",
+          f"\ts.blast_zone = FxRect.new({gd(BLAST[0])}, {gd(BLAST[1])}, {gd(BLAST[2])}, {gd(BLAST[3])})",
           "\t_cache[stage_id] = s", "\treturn s", "",
           "", "## The art folder for an arena stage id (\"rooftops\" is Shan's), or \"\".",
           "static func art_folder(stage_id: String) -> String:",

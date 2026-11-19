@@ -110,6 +110,8 @@ The pack's 48 hazard types are grouped into three behaviours (`tools/gen_arena_s
 
 **Versions:** `Simulation.SIM_VERSION` is 5, and the arena protocol is version 3 (STATE carries each fighter's last hit and main weapon).
 
+**Screen-edge ring-outs** (asked for "like Chaos Faction"). The camera never shows past the 32 m of painted arena: its widest view is exactly the arena's width, so the screen is always full of arena, and it pans up and down to keep fighters in view. The side blast zones moved in from 26 m to **17.2 m**: a fighter is out once their body (0.8 m wide) has gone off the side of the screen by its own width. Top and bottom are unchanged. In a four-bot test this means a KO about every 5 s, at 23–81% Josh. `Simulation.SIM_VERSION` is 6.
+
 ## Not built yet
 
 These come from v0.2 and the GDD:

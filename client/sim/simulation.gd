@@ -11,7 +11,7 @@ const TICKS_PER_SECOND := 60
 
 ## Bump when the sim's behaviour changes on purpose: online players with different versions
 ## refuse to play each other instead of desyncing.
-const SIM_VERSION := 5
+const SIM_VERSION := 6 # 6: arena side blast zones at the screen's edge (17.2 m)
 
 ## Most fighters in one match: online rooms hold up to 15 players (one spare slot).
 const MAX_FIGHTERS := 16

@@ -772,7 +772,7 @@ static func by_id(stage_id: String) -> StageDefinition:
 		s.hazard_dirs.append(h[2])
 	s.spawn_x = PackedInt64Array([Fx.from_int(-11), Fx.from_int(11), Fx.from_int(-4), Fx.from_int(4), Fx.from_int(-8), Fx.from_int(8), Fx.from_int(-1), Fx.from_int(1)])
 	s.spawn_y = PackedInt64Array([Fx.from_int(2), Fx.from_int(2), Fx.from_int(2), Fx.from_int(2), Fx.from_int(2), Fx.from_int(2), Fx.from_int(2), Fx.from_int(2)])
-	s.blast_zone = FxRect.new(Fx.from_int(-26), Fx.from_int(-10), Fx.from_int(26), Fx.from_int(22))
+	s.blast_zone = FxRect.new(Fx.ratio(-86, 5), Fx.from_int(-10), Fx.ratio(86, 5), Fx.from_int(22))
 	_cache[stage_id] = s
 	return s
 

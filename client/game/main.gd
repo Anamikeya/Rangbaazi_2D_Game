@@ -349,7 +349,20 @@ func _build_panel() -> void:
 		if _room_session != null:
 			_room_session.end_match()
 		_close_panel())
-	_panel_button(column, "Leave match", _go_to_menu.bind(""))
+	var leave := _panel_button(column, "Leave match", _go_to_menu.bind(""))
+	if UiTheme.can_quit():
+		# Leave and Quit side by side, so the panel doesn't grow taller on a phone.
+		var bottom := HBoxContainer.new()
+		bottom.add_theme_constant_override("separation", 20)
+		column.add_child(bottom)
+		column.remove_child(leave)
+		bottom.add_child(leave)
+		leave.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var quit := UiTheme.quit_button()
+		quit.custom_minimum_size = leave.custom_minimum_size
+		quit.add_theme_font_size_override("font_size", 40)
+		quit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		bottom.add_child(quit)
 
 
 ## The how-to-play card: shown once before the first match (practice waits behind it), and from

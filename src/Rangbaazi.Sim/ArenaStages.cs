@@ -23,7 +23,7 @@ public static class ArenaStages
         new FixVec2(Fix.FromInt(1), Fix.FromInt(2)),
     };
 
-    private static readonly FixRect Blast = new(Fix.FromInt(-26), Fix.FromInt(-10), Fix.FromInt(26), Fix.FromInt(22));
+    private static readonly FixRect Blast = new(Fix.FromRatio(-86, 5), Fix.FromInt(-10), Fix.FromRatio(86, 5), Fix.FromInt(22));
 
     /// <summary>Every arena stage, in a fixed order (by art folder name).</summary>
     public static readonly IReadOnlyList<StageDefinition> All = new[]

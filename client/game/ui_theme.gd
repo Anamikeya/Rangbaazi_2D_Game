@@ -85,6 +85,31 @@ static func primary_box(shade: float) -> StyleBoxFlat:
 	return _box(fill, fill.lightened(0.25))
 
 
+## Whether the game can close itself: on Android and desktop yes; in a browser the page can't
+## close its own tab, so there's no Quit button there.
+static func can_quit() -> bool:
+	return not OS.has_feature("web")
+
+
+## A "Quit game" button. The first tap asks ("Tap again to quit"); a second within 3 s closes
+## the game, so a stray tap doesn't.
+static func quit_button() -> Button:
+	var b := Button.new()
+	b.text = "Quit game"
+	b.focus_mode = Control.FOCUS_NONE
+	b.pressed.connect(func() -> void:
+		if b.text == "Quit game":
+			b.text = "Tap again to quit"
+			b.add_theme_color_override("font_color", ERROR)
+			b.get_tree().create_timer(3.0).timeout.connect(func() -> void:
+				if is_instance_valid(b):
+					b.text = "Quit game"
+					b.remove_theme_color_override("font_color"))
+		else:
+			b.get_tree().quit())
+	return b
+
+
 ## Makes a button the screen's main action: filled with the accent colour, dark type.
 static func make_primary(button: Button) -> void:
 	button.add_theme_stylebox_override("normal", primary_box(0.0))

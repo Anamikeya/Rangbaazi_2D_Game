@@ -121,7 +121,9 @@ const CAMERA_MAX_ZOOM := 2.1   # times the whole-arena view
 const CAMERA_MIN_WIDTH := 17.0 # metres across, at the closest
 const CAMERA_MIN_HEIGHT := 8.5
 const CAMERA_NEAR := 10.0      # in a crowd, the view frames you and fighters this close (metres)
-const ARENA_HALF_WIDTH := 20.0 # how far from the arena's centre the view may reach: 4 m past the painted edges, so a fight at the edge of the stage is not pinned to the side of the screen
+const ARENA_HALF_WIDTH := 16.0 # the painted arena's half width: the view never reaches past it
+const ART_BOTTOM := -1.5       # metres: the lowest the view goes (the art ends 1.75 m under the floor)
+const ART_TOP := 16.0          # and the highest (the art ends 16.25 m above it)
 
 var _origin := Vector2.ZERO
 var _ppm := 50.0 # pixels per metre
@@ -160,16 +162,14 @@ func _draw() -> void:
 	var metres := TOUCH_VIEW_METRES if touch_layout else VIEW_METRES
 	var ground := TOUCH_GROUND_Y if touch_layout else GROUND_Y
 	var arena_stage := rules.stage.id != "graybox" and not rules.stage.id.begins_with("test")
-	if arena_stage:
-		# An arena is 32 m wide and 12 m tall: show all of it, the floor near the bottom.
-		metres = Vector2(33, 14.5)
-		ground = 0.8 if touch_layout else 0.88
-	_ppm = minf(size.x / metres.x, strip / metres.y) if arena_stage else maxf(50.0, minf(size.x / metres.x, strip / metres.y))
+	_ppm = maxf(50.0, minf(size.x / metres.x, strip / metres.y))
 	_origin = Vector2(size.x * 0.5, _bar_bottom + strip * ground)
 	if state != null:
 		_watch_fx()
-	if arena_stage and state != null and dynamic_camera:
-		_move_camera(size, strip, ground)
+	if arena_stage:
+		# The screen is always filled with the painted arena, edge to edge: the view never goes
+		# past its sides (the side blast zones sit just beyond them, as in the sim).
+		_move_camera(size, strip, dynamic_camera)
 	if _shake > 0.2 and shake_enabled:
 		_origin += Vector2(sin(_shake * 7.3), cos(_shake * 5.1)) * _shake
 	_shake *= 0.86
@@ -749,17 +749,17 @@ func _draw_platform_art(arena: Dictionary, index: int, platform: FxRect) -> bool
 
 # ---- the camera ----
 
-## Frames the fight: the fighters that matter, with room around them, never closer than
-## CAMERA_MIN_WIDTH, never wider than the whole arena, and never past the painted arena's edges.
-## It eases towards that view, so it glides instead of jumping. `_ppm` and `_origin` hold the
-## whole-arena view on entry and the camera's view on return.
-func _move_camera(size: Vector2, strip: float, ground: float) -> void:
-	var full_ppm := _ppm
-	var full_cy := (ground - 0.5) * strip / full_ppm # metres above the floor at mid-screen
-	var full_half_h := strip / (2.0 * full_ppm)
-	var target := Vector2(0.0, full_cy)
+## Frames the fight. The widest view is exactly the painted arena's width, so the screen is
+## always full of arena and never shows past its sides; a fighter who goes off a side is gone.
+## Zoomed (`zoom`, the "follows the fight" setting): the fighters that matter, with room around
+## them, never closer than CAMERA_MIN_WIDTH. Either way it pans up and down to keep them in view,
+## within the art's top and bottom. It eases towards that view, so it glides instead of jumping.
+func _move_camera(size: Vector2, strip: float, zoom: bool) -> void:
+	var full_ppm := size.x / (2.0 * ARENA_HALF_WIDTH)
 	var target_ppm := full_ppm
-	var focus := _focus()
+	var half_h := strip / (2.0 * full_ppm)
+	var target := Vector2(0.0, ART_BOTTOM + half_h) # the floor near the bottom
+	var focus := _focus() if state != null else ([] as Array[Fighter])
 	if not focus.is_empty():
 		var lo := Vector2(INF, INF)
 		var hi := Vector2(-INF, -INF)
@@ -769,20 +769,28 @@ func _move_camera(size: Vector2, strip: float, ground: float) -> void:
 			hi = hi.max(at)
 		var top := hi.y + 3.0 # heads, labels and a jump's worth of sky
 		var bottom := lo.y - 1.5
-		var w := maxf(hi.x - lo.x + 9.0, CAMERA_MIN_WIDTH)
-		var h := maxf(top - bottom, CAMERA_MIN_HEIGHT)
-		target_ppm = clampf(minf(size.x / w, strip / h), full_ppm, full_ppm * CAMERA_MAX_ZOOM)
+		if zoom:
+			var w := maxf(hi.x - lo.x + 9.0, CAMERA_MIN_WIDTH)
+			var h := maxf(top - bottom, CAMERA_MIN_HEIGHT)
+			target_ppm = clampf(minf(size.x / w, strip / h), full_ppm, full_ppm * CAMERA_MAX_ZOOM)
 		var half_w := size.x / (2.0 * target_ppm)
-		var half_h := strip / (2.0 * target_ppm)
-		target.x = clampf((lo.x + hi.x) / 2.0, -ARENA_HALF_WIDTH + half_w, ARENA_HALF_WIDTH - half_w) if half_w < ARENA_HALF_WIDTH else 0.0
-		target.y = clampf((top + bottom) / 2.0, full_cy - full_half_h + half_h, full_cy + full_half_h - half_h)
-	if _cam_ppm <= 0.0 or state.frame < _cam_frame or state.frame > _cam_frame + 30:
-		_cam = target # a new match, or the first frame: start there
+		half_h = strip / (2.0 * target_ppm)
+		target.x = clampf((lo.x + hi.x) / 2.0, -ARENA_HALF_WIDTH + half_w, ARENA_HALF_WIDTH - half_w)
+		# Keep the highest fighter's head in view before the lowest one's feet.
+		var cy := top - half_h if top - bottom > 2.0 * half_h else (top + bottom) / 2.0
+		target.y = clampf(cy, ART_BOTTOM + half_h, maxf(ART_BOTTOM + half_h, ART_TOP - half_h))
+	var frame := state.frame if state != null else -1
+	if _cam_ppm <= 0.0 or frame < 0 or frame < _cam_frame or frame > _cam_frame + 30:
+		_cam = target # a new match, the first frame, or no match (the menu's backdrop): start there
 		_cam_ppm = target_ppm
-	elif state.frame != _cam_frame:
+	elif frame != _cam_frame:
 		_cam = _cam.lerp(target, 0.07)
 		_cam_ppm = lerpf(_cam_ppm, target_ppm, 0.05)
-	_cam_frame = state.frame
+	_cam_frame = frame
+	# While easing (or after the window changed size), still never past the sides.
+	_cam_ppm = maxf(_cam_ppm, full_ppm)
+	var edge := ARENA_HALF_WIDTH - size.x / (2.0 * _cam_ppm)
+	_cam.x = clampf(_cam.x, -edge, edge)
 	_ppm = _cam_ppm
 	_origin = Vector2(size.x * 0.5 - _cam.x * _ppm, _bar_bottom + strip * 0.5 + _cam.y * _ppm)
 

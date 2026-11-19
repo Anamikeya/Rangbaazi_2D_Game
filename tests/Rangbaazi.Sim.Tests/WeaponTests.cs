@@ -489,7 +489,9 @@ public class WeaponTests
             Simulation.Advance(live, rules, inputs);
             Assert.Equal(reference.Checksum(), live.Checksum());
         }
-        Assert.True(armed > 1000, $"the bots were armed for only {armed} fighter-frames");
+        // Since the sides moved in to the screen's edge (17.2 m), the bots are knocked out about every
+        // 5 s here and drop their weapons each time, so they hold one for a few hundred frames.
+        Assert.True(armed > 150, $"the bots were armed for only {armed} fighter-frames");
         Assert.True(shots > 100, $"only {shots} shot-frames: the bots hardly fired");
     }
 }
