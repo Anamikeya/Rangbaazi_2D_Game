@@ -197,7 +197,7 @@ internal sealed class ArenaRoom
         }
         // Each fighter's own weapon hits a little harder for them (Weapons.SignatureFor).
         var signatures = new WeaponId[Fighters.Count];
-        for (int i = 0; i < signatures.Length; i++) signatures[i] = Weapons.SignatureFor(Fighters[i].Character);
+        for (int i = 0; i < signatures.Length; i++) signatures[i] = Weapons.SignatureFor(ArenaLimits.Look(Fighters[i].Character));
         Rules = MatchRules.Room(ArenaStages.ById(StageId) ?? Stages.Rooftops, Minutes, signatures);
         State = Simulation.CreateInitialState(Rules, Fighters.Count, (ulong)seed);
         Phase = ArenaPhase.Playing;

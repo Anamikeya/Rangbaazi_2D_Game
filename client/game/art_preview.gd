@@ -11,6 +11,8 @@ var fighter_id := ""
 var clip := "idle"
 ## Off: no dark box or border, so the picture stands straight on whatever is behind it.
 var framed := true
+## On: a move that doesn't loop plays again after a short pause (the character creator's poses).
+var replay := false
 var _painter: FighterPainter
 var _painter_id := ""
 var _frame := 0
@@ -51,6 +53,10 @@ func _draw() -> void:
 		draw_set_transform(Vector2(size.x / 2, size.y * 0.92), 0.0, Vector2(1, 0.3))
 		draw_circle(Vector2.ZERO, size.x * 0.3, Color(UiTheme.ACCENT, 0.4))
 		draw_set_transform_matrix(Transform2D.IDENTITY)
-		_painter.draw(self, Vector2(size.x / 2, size.y * 0.92), size.y / 300.0, 1, clip, _frame)
+		var frame := _frame
+		var move := ArtLibrary.clip(_painter.character_id, clip)
+		if replay and not bool(move.get("loop", false)):
+			frame = _frame % (int(move.get("d", 1)) + 40)
+		_painter.draw(self, Vector2(size.x / 2, size.y * 0.92), size.y / 300.0, 1, clip, frame)
 	if framed:
 		draw_rect(r, Color(UiTheme.ACCENT, 0.8), false, 4.0)

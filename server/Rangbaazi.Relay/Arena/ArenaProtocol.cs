@@ -47,7 +47,25 @@ internal static class ArenaLimits
 
     public const string DefaultCharacter = "shahn";
 
-    public static string CleanCharacter(string? id) => id is not null && Array.IndexOf(Characters, id) >= 0 ? id : DefaultCharacter;
+    /// <summary>A fighter from the character creator: "mix.head.hands.feet.moves.name", the four each one of the 31.</summary>
+    public const string MixPrefix = "mix.";
+
+    /// <summary>One of the 31 ids, or a well-formed mixed fighter (its name cleaned like a player's); anything else is the default.</summary>
+    public static string CleanCharacter(string? id)
+    {
+        if (id is null) return DefaultCharacter;
+        if (Array.IndexOf(Characters, id) >= 0) return id;
+        string[] bits = id.Split('.');
+        if (!id.StartsWith(MixPrefix, StringComparison.Ordinal) || bits.Length != 6) return DefaultCharacter;
+        for (int i = 1; i <= 4; i++)
+        {
+            if (Array.IndexOf(Characters, bits[i]) < 0) return DefaultCharacter;
+        }
+        return $"{MixPrefix}{bits[1]}.{bits[2]}.{bits[3]}.{bits[4]}.{PlayerName.Clean(bits[5], "")}";
+    }
+
+    /// <summary>The one of the 31 a fighter counts as (for its own weapon): itself, or a mixed fighter's head.</summary>
+    public static string Look(string id) => id.StartsWith(MixPrefix, StringComparison.Ordinal) ? id.Split('.')[1] : id;
 
     public static bool IsStage(string? id) => id is not null && ArenaStages.ById(id) is not null;
 }

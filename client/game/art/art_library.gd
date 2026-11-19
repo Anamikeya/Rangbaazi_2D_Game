@@ -33,7 +33,48 @@ static func arenas() -> Array:
 	return index().get("arenas", [])
 
 
+## A mixed fighter (the character creator): "mix.<head>.<hands>.<feet>.<moves>.<name>", each of the
+## four one of the 31 fighters' ids. The head brings its faces and hat; the moves are how it's
+## animated. The same string goes to the room server (ArenaLimits.CleanCharacter checks it too).
+const MIX := "mix."
+
+
+static func is_mix(id: String) -> bool:
+	return id.begins_with(MIX)
+
+
+static func make_mix(head: String, hands: String, feet: String, moves: String, name: String) -> String:
+	return "%s%s.%s.%s.%s.%s" % [MIX, head, hands, feet, moves, GameSettings.clean_name(name)]
+
+
+## [head, hands, feet, moves, name] of a mixed fighter, or empty if the id isn't a valid one.
+static func mix_parts(id: String) -> PackedStringArray:
+	var bits := id.split(".")
+	if not is_mix(id) or bits.size() != 6:
+		return PackedStringArray()
+	for i in range(1, 5):
+		if not is_fighter(bits[i]):
+			return PackedStringArray()
+	return PackedStringArray([bits[1], bits[2], bits[3], bits[4], GameSettings.clean_name(bits[5])])
+
+
+static func is_fighter(id: String) -> bool:
+	for f: Dictionary in fighters():
+		if f["id"] == id:
+			return true
+	return false
+
+
+## The one of the 31 a fighter looks and sounds like: itself, or a mixed fighter's head.
+static func look(id: String) -> String:
+	var m := mix_parts(id)
+	return m[0] if not m.is_empty() else id
+
+
 static func fighter_name(id: String) -> String:
+	if is_mix(id):
+		var m := mix_parts(id)
+		return m[4] if not m.is_empty() and m[4] != "" else "Custom"
 	for f: Dictionary in fighters():
 		if f["id"] == id:
 			return str(f["name"])
@@ -41,6 +82,8 @@ static func fighter_name(id: String) -> String:
 
 
 static func fighter_role(id: String) -> String:
+	if is_mix(id):
+		return "Your own fighter"
 	for f: Dictionary in fighters():
 		if f["id"] == id:
 			return str(f.get("role", ""))
@@ -64,11 +107,41 @@ static func arena_title(id: String) -> String:
 
 ## A fighter's rig and moves ({parts, clips}), or {} if it isn't in the assets.
 static func character(id: String) -> Dictionary:
+	if not _characters.has(id) and is_mix(id):
+		_characters[id] = _compose(id)
 	if not _characters.has(id):
 		var text := FileAccess.get_file_as_string("%s/characters/%s/clips.json" % [ROOT, id])
 		var parsed: Variant = JSON.parse_string(text) if text != "" else null
 		_characters[id] = parsed if parsed is Dictionary else {}
 	return _characters[id]
+
+
+## A mixed fighter's rig: the head (with its hat and extras), hands and feet of three fighters,
+## animated with a fourth's moves. Texture files are written "<fighter>/<file>".
+static func _compose(id: String) -> Dictionary:
+	var m := mix_parts(id)
+	if m.is_empty():
+		return {}
+	var parts := {}
+	_take(parts, m[0], ["head"], "")
+	_take(parts, m[1], ["backHand", "frontHand"], "hand_")
+	_take(parts, m[2], ["backFoot", "frontFoot"], "foot_")
+	return {"id": id, "parts": parts, "clips": character(m[3]).get("clips", {})}
+
+
+## Copies the named parts of a fighter's rig, and the extras that ride on them, into `out`.
+static func _take(out: Dictionary, from: String, names: Array, prefix: String) -> void:
+	var source: Dictionary = character(from).get("parts", {})
+	for part: String in source.keys():
+		var spec: Dictionary = source[part]
+		var named := names.has(part)
+		if not named and not names.has(str(spec.get("parent", ""))):
+			continue
+		var copy := spec.duplicate(true)
+		var textures: Dictionary = copy.get("textures", {})
+		for slot: String in textures.keys():
+			textures[slot] = "%s/%s" % [from, textures[slot]]
+		out[part if named or prefix == "" else prefix + part] = copy
 
 
 ## The 18 moves every fighter shares (a fighter's own version, if any, wins).
@@ -98,6 +171,8 @@ static func arena(stage_id: String) -> Dictionary:
 
 
 static func character_texture(character_id: String, file: String) -> Texture2D:
+	if file.contains("/"): # a mixed fighter's part: "<fighter>/<file>"
+		return _texture("%s/characters/%s" % [ROOT, file])
 	return _texture("%s/characters/%s/%s" % [ROOT, character_id, file])
 
 
@@ -109,7 +184,7 @@ static func arena_texture(stage_id: String, file: String) -> Texture2D:
 static func effect_texture(character_id: String, kind: String) -> Texture2D:
 	if character_id == "":
 		return null
-	return _texture("%s/effects/%s-%s.wbin" % [ROOT, character_id, kind])
+	return _texture("%s/effects/%s-%s.wbin" % [ROOT, look(character_id), kind])
 
 
 ## A weapon's sprite (tools/cut_weapons.gd), by the sim's weapon id, or null.

@@ -72,6 +72,7 @@ var _chat_layer: CanvasLayer
 var _end_match_button: Button
 # The pickers: the character circle and the arena slider (layer 7, over everything).
 var _circle: CharacterCircle
+var _creator: CharacterCreator
 var _arena_picker: ArenaPicker
 var _picker_for := "" # "practice" or "room": what the arena slider's pick is for
 var _cpu_character := "akshat"
@@ -221,6 +222,19 @@ func _build_nodes() -> void:
 	picker_layer.add_child(_circle)
 	_circle.chosen.connect(_on_fighter_chosen)
 	_circle.cancelled.connect(func() -> void: _circle.hide())
+	_creator = CharacterCreator.new()
+	_creator.visible = false
+	picker_layer.add_child(_creator)
+	_circle.create_requested.connect(func() -> void:
+		_circle.hide()
+		_creator.open(GameSettings.character))
+	_creator.cancelled.connect(func() -> void:
+		_creator.hide()
+		_circle.open(GameSettings.character))
+	_creator.saved.connect(func(id: String) -> void:
+		GameSettings.custom = id
+		_creator.hide()
+		_on_fighter_chosen(id))
 	_arena_picker = ArenaPicker.new()
 	_arena_picker.visible = false
 	picker_layer.add_child(_arena_picker)
@@ -562,7 +576,7 @@ func _restart_practice() -> void:
 		if not ids.is_empty():
 			_cpu_character = ids[_rng.randi_range(0, ids.size() - 1)]
 		# Each fighter's own weapon hits a little harder for them.
-		_rules.signatures = PackedInt32Array([Weapons.signature_for(GameSettings.character), Weapons.signature_for(_cpu_character)])
+		_rules.signatures = PackedInt32Array([Weapons.signature_for(ArtLibrary.look(GameSettings.character)), Weapons.signature_for(_cpu_character)])
 	_rules.guts = _guts
 	var match_seed: int = SceneSmoke.SEED if _smoke != null else _rng.randi()
 	_state = Simulation.create_initial_state(_rules, PLAYERS, match_seed)
@@ -801,7 +815,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _smoke != null or _mode == Mode.MENU:
 		return
 	if event.is_action_pressed(InputReader.BACK):
-		if _circle.visible or _arena_picker.visible:
+		if _circle.visible or _creator.visible or _arena_picker.visible:
 			return # the pickers handle their own Back
 		if _chat_layer.visible:
 			_close_chat()

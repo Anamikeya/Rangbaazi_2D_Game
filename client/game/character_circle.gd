@@ -8,8 +8,11 @@ extends Control
 
 signal chosen(id: String)
 signal cancelled
+## "Create your own" was pressed: open the character creator.
+signal create_requested
 
 const SPIN_EASE := 10.0 # how quickly the circle settles on its target (per second)
+const FRONT_GAP := 3.0 # the fighter in front stands this many gaps clear of its neighbours
 const DRAG_TURNS := 1.6 # a drag across the whole screen turns the circle this many fighters per 100 px
 
 var _ids: PackedStringArray = []
@@ -30,9 +33,7 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	theme = UiTheme.build()
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	for f: Dictionary in ArtLibrary.fighters():
-		_ids.append(str(f["id"]))
-		_painters.append(FighterPainter.new(str(f["id"])))
+	_fill()
 
 	var top := VBoxContainer.new()
 	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
@@ -68,6 +69,9 @@ func _ready() -> void:
 	var right := _button(">", 130)
 	right.pressed.connect(func() -> void: step(1))
 	bottom.add_child(right)
+	var create := _button("Create your own", 420)
+	create.pressed.connect(func() -> void: create_requested.emit())
+	bottom.add_child(create)
 
 	_hint = _label("Drag to spin the circle, tap a fighter to bring them forward", 26, UiTheme.TEXT_DIM)
 	_hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
@@ -77,8 +81,24 @@ func _ready() -> void:
 	add_child(_hint)
 
 
+## The 31 fighters, and the player's own creation (if they've made one) standing with them.
+func _fill() -> void:
+	var ids := PackedStringArray()
+	for f: Dictionary in ArtLibrary.fighters():
+		ids.append(str(f["id"]))
+	if not ArtLibrary.mix_parts(GameSettings.custom).is_empty():
+		ids.append(GameSettings.custom)
+	if ids == _ids:
+		return
+	_ids = ids
+	_painters.clear()
+	for id in _ids:
+		_painters.append(FighterPainter.new(id))
+
+
 ## Opens with this fighter in front.
 func open(id: String) -> void:
+	_fill()
 	var i := maxi(0, _ids.find(id))
 	_target = i * _step_angle()
 	_angle = _target
@@ -179,11 +199,18 @@ func _place(i: int) -> Array:
 	var s := size
 	var centre := Vector2(s.x * 0.5, s.y * 0.6)
 	var radius := Vector2(s.x * 0.45, s.y * 0.2)
-	var theta := PI / 2.0 + (i * _step_angle() - _angle)
+	# How many fighters round from the front this one is (-n/2..n/2). The front fighter gets
+	# FRONT_GAP times the usual gap on both sides; the rest close up evenly to make the room.
+	var n := float(_ids.size())
+	var half := n / 2.0
+	var d := fposmod(i - _angle / _step_angle() + half, n) - half
+	var a := absf(d)
+	var spread := FRONT_GAP * a if a <= 1.0 or half <= FRONT_GAP else FRONT_GAP + (a - 1.0) * (half - FRONT_GAP) / (half - 1.0)
+	var theta := PI / 2.0 + signf(d) * spread * _step_angle()
 	var depth := (sin(theta) + 1.0) / 2.0
 	var pos := centre + Vector2(radius.x * cos(theta), radius.y * sin(theta))
 	# Far fighters shrink fast, so the ones near the front stand apart and the front one stands out.
-	var scale := lerpf(0.35, 1.05, pow(depth, 3.0))
+	var scale := lerpf(0.35, 1.05, pow(depth, 6.0))
 	if depth > 0.985:
 		scale *= 1.3
 	return [pos, scale, depth]

@@ -89,11 +89,11 @@ func play(name: String, volume_db := 0.0, pitch := 1.0) -> void:
 
 ## A fighter's own foley: "step" or "swish".
 func foley(character: String, kind: String, volume_db := 0.0) -> void:
-	_one_shot("res://audio/foley/%s.%s.wav" % [character, kind], volume_db, randf_range(0.94, 1.06))
+	_one_shot("res://audio/foley/%s.%s.wav" % [ArtLibrary.look(character), kind], volume_db, randf_range(0.94, 1.06))
 
 
 func cheer(character: String) -> void:
-	_one_shot("res://audio/cheer/%s.wav" % character, 2.0, 1.0)
+	_one_shot("res://audio/cheer/%s.wav" % ArtLibrary.look(character), 2.0, 1.0)
 
 
 func _one_shot(path: String, volume_db: float, pitch: float) -> void:

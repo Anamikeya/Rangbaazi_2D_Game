@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Rangbaazi.Relay.Arena;
 using System.Net.WebSockets;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -8,6 +9,28 @@ namespace Rangbaazi.Relay.Tests;
 /// <summary>The relay's building blocks in isolation.</summary>
 public sealed class UnitTests
 {
+    [Theory]
+    [InlineData("rajat", "rajat")]
+    [InlineData("nobody", "shahn")]
+    [InlineData(null, "shahn")]
+    [InlineData("mix.rajat.shahn.akshat.suhani.Rocky", "mix.rajat.shahn.akshat.suhani.Rocky")]
+    [InlineData("mix.rajat.shahn.akshat.suhani.", "mix.rajat.shahn.akshat.suhani.")]
+    [InlineData("mix.rajat.shahn.akshat.suhani.<b>Ro!cky 12345678", "mix.rajat.shahn.akshat.suhani.bRocky 12345")]
+    [InlineData("mix.rajat.shahn.akshat.nobody.Rocky", "shahn")]
+    [InlineData("mix.rajat.shahn.akshat.Rocky", "shahn")]
+    [InlineData("mix.rajat.shahn.akshat.suhani.Ro.cky", "shahn")]
+    public void Characters_are_one_of_the_cast_or_a_well_formed_mix(string? raw, string expected)
+    {
+        Assert.Equal(expected, ArenaLimits.CleanCharacter(raw));
+    }
+
+    [Fact]
+    public void A_mixed_fighter_counts_as_its_head()
+    {
+        Assert.Equal("rajat", ArenaLimits.Look("mix.rajat.shahn.akshat.suhani.Rocky"));
+        Assert.Equal("salik", ArenaLimits.Look("salik"));
+    }
+
     [Theory]
     [InlineData("abcd", "ABCD")]
     [InlineData("Ab12", "AB12")]

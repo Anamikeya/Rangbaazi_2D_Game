@@ -11,6 +11,8 @@ static var player_name := ""
 ## The fighter picked in the character circle (one of the 31 ids), and the arena for practice.
 static var character := "shahn"
 static var arena := "rooftops"
+## The fighter made in the character creator (a "mix" id, see ArtLibrary), or "" for none yet.
+static var custom := ""
 ## Frames drawn per second (60 or 30). The game itself always runs at 60; 30 saves battery.
 static var max_fps := 60
 ## Effects: shake on a hit you take. Off is calmer and a little cheaper.
@@ -38,6 +40,7 @@ static func load_settings() -> void:
 	player_name = clean_name(str(cfg.get_value("player", "name", "")))
 	character = str(cfg.get_value("player", "character", "shahn"))
 	arena = str(cfg.get_value("player", "arena", "rooftops"))
+	custom = str(cfg.get_value("player", "custom", ""))
 	max_fps = int(cfg.get_value("graphics", "max_fps", 60))
 	if not FPS_CHOICES.has(max_fps):
 		max_fps = 60
@@ -58,6 +61,7 @@ static func save() -> void:
 	cfg.set_value("player", "name", player_name)
 	cfg.set_value("player", "character", character)
 	cfg.set_value("player", "arena", arena)
+	cfg.set_value("player", "custom", custom)
 	cfg.set_value("graphics", "max_fps", max_fps)
 	cfg.set_value("graphics", "effects", effects)
 	cfg.set_value("graphics", "show_hitboxes", show_hitboxes)
