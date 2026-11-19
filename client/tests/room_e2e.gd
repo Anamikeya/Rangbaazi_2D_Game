@@ -4,7 +4,8 @@ extends SceneTree
 ##   godot --headless --path client -s res://tests/room_e2e.gd -- --relay ws://127.0.0.1:8080
 ## A host and a guest RoomSession join one room; the host checks the 10-15 minute limit, adds 3
 ## CPUs and starts. Then, in real time (60 ticks a second): the guest holds right and must move
-## right, both must see the same 5 fighters and frames from the server, a quick-chat line must
+## right, both must see the same 5 fighters and frames from the server, the guest's auto play must
+## press buttons and attack over ten seconds, a quick-chat line must
 ## reach the host, and the host ends the match, which must bring both back to the lobby.
 ## Exit code 0 = pass.
 
@@ -24,6 +25,9 @@ func _initialize() -> void:
 	var guest_x0 := 0
 	var hold_ticks := 0
 	var moved := 0
+	var auto_ticks := 0
+	var auto_pressed := 0
+	var auto_attacks := 0
 	print("room e2e: %s" % RoomSession.url_for_room(room, true, 10, "Host"))
 
 	while result == "":
@@ -33,6 +37,10 @@ func _initialize() -> void:
 			continue
 		next_tick += 16
 		var guest_buttons := Buttons.RIGHT if step == "move" else Buttons.NONE
+		if step == "auto":
+			guest_buttons = guest.autopilot_buttons(SparringBot.Level.NORMAL)
+			auto_pressed += 1 if guest_buttons != 0 else 0
+			auto_attacks += 1 if (guest_buttons & (Buttons.LIGHT | Buttons.HEAVY)) != 0 else 0
 		host.tick(Buttons.NONE)
 		if guest != null:
 			guest.tick(guest_buttons)
@@ -78,6 +86,14 @@ func _initialize() -> void:
 					if absi(host.state.frame - guest.state.frame) > 30:
 						result = "FAIL host and guest are %d frames apart" % absi(host.state.frame - guest.state.frame)
 						break
+					step = "auto"
+			"auto":
+				# Auto play: a bot on the guest's side presses its buttons for ten seconds.
+				auto_ticks += 1
+				if auto_ticks == 600:
+					if auto_pressed < 60 or auto_attacks == 0:
+						result = "FAIL auto play pressed buttons on %d ticks and attacked on %d" % [auto_pressed, auto_attacks]
+						break
 					guest.say(0)
 					step = "chat"
 			"chat":
@@ -96,7 +112,7 @@ func _initialize() -> void:
 						break
 			"end":
 				if host.phase == RoomSession.Phase.LOBBY and guest.phase == RoomSession.Phase.LOBBY:
-					result = "PASS 5 fighters, guest moved %.1f m, chat delivered, a weapon box arrived, back to the lobby" % Fx.to_float(moved)
+					result = "PASS 5 fighters, guest moved %.1f m, auto play fought, chat delivered, a weapon box arrived, back to the lobby" % Fx.to_float(moved)
 
 	host.close()
 	if guest != null:

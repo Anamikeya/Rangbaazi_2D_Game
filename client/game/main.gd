@@ -80,6 +80,13 @@ var _sound: SoundDirector
 const CHAT_BUBBLE_TICKS := 180
 const HOST_RETRIES := 3
 
+## Auto play: a CPU plays the local fighter (in any mode) until the button is pressed again, so a
+## player can step away mid-match. Deliberately only middling, so the others can beat it.
+const AUTO_LEVEL := SparringBot.Level.NORMAL
+const AUTO_BUTTON := Vector2(250, 62)
+var _auto := false
+var _auto_button: Button
+
 var _smoke: SceneSmoke
 var _smoke_done := false
 
@@ -185,6 +192,14 @@ func _build_nodes() -> void:
 	_chat_button.offset_right = -(MENU_MARGIN * 2 + MENU_BUTTON)
 	_chat_button.offset_top = MENU_MARGIN
 	_chat_button.offset_bottom = MENU_MARGIN + MENU_BUTTON
+
+	_auto_button = _hud_button(_hud, "Auto play", func() -> void:
+		_auto = _auto_button.button_pressed
+		_refresh())
+	_auto_button.toggle_mode = true
+	_auto_button.tooltip_text = "Let the CPU play your fighter while you're away"
+	_auto_button.custom_minimum_size = AUTO_BUTTON
+	_auto_button.add_theme_font_size_override("font_size", 26)
 
 	var touch_layer := CanvasLayer.new()
 	touch_layer.name = "Touch"
@@ -544,6 +559,7 @@ func _go_to_menu(message: String = "") -> void:
 	_close_room()
 	_mode = Mode.MENU
 	_state = null
+	_auto = false
 	_panel_layer.hide()
 	_help_layer.hide()
 	_touch.hide()
@@ -562,6 +578,7 @@ func _start_practice() -> void:
 
 ## A new practice match with the current CPU and Guts settings.
 func _restart_practice() -> void:
+	_auto = false
 	_rules = MatchRules.new()
 	_rules.weapons = true
 	_rules.flurry = true
@@ -743,7 +760,12 @@ func _practice_step() -> void:
 		return # the first match waits behind the how-to-play card
 	# Both fighters' buttons come from the same pre-advance state, the CPU's included.
 	for p in PLAYERS:
-		_inputs[p] = SparringBot.think(_state, _rules, p, _cpu_level) if p == 1 and _p2_cpu else _local_buttons(p)
+		if p == 1 and _p2_cpu:
+			_inputs[p] = SparringBot.think(_state, _rules, p, _cpu_level)
+		elif p == 0 and _auto and _smoke == null:
+			_inputs[p] = _auto_buttons()
+		else:
+			_inputs[p] = _local_buttons(p)
 	if _smoke != null:
 		var problem := _smoke.check_read(_state.frame, _inputs[0])
 		if problem != "":
@@ -757,7 +779,7 @@ func _practice_step() -> void:
 func _online_step() -> void:
 	if _session == null:
 		return
-	_session.tick(_local_buttons(0))
+	_session.tick(_auto_buttons() if _auto else _local_buttons(0))
 	_stalled_ticks = _stalled_ticks + 1 if _session.stalled else 0
 
 
@@ -765,7 +787,14 @@ func _room_step() -> void:
 	if _room_session == null:
 		return
 	var playing := _room_session.phase == RoomSession.Phase.PLAYING
-	_room_session.tick(_local_buttons(0) if playing and not _chat_layer.visible else 0)
+	if not playing:
+		_auto = false # every match starts with you at the controls
+	var buttons := 0
+	if playing and _auto:
+		buttons = _auto_buttons() # keeps fighting while you chat
+	elif playing and not _chat_layer.visible:
+		buttons = _local_buttons(0)
+	_room_session.tick(buttons)
 	if _room_session.phase == RoomSession.Phase.ENDED:
 		var code := _room_session.end_code
 		var message := _room_session.end_message
@@ -776,6 +805,67 @@ func _room_step() -> void:
 		_go_to_menu(message if code != "left" else "")
 		return
 	_update_touch()
+
+
+## Which fighter is this device's: 0 in practice, our slot online, our fighter in a room (-1: none).
+func _my_fighter() -> int:
+	match _mode:
+		Mode.PRACTICE:
+			return 0
+		Mode.ONLINE:
+			return int(_session.local_slot) if _session != null else -1
+		Mode.ROOM:
+			return _room_session.my_fighter if _room_session != null else -1
+	return -1
+
+
+## Auto play's buttons for the local fighter: a SparringBot reading the state on show.
+func _auto_buttons() -> int:
+	match _mode:
+		Mode.PRACTICE:
+			return SparringBot.think(_state, _rules, 0, AUTO_LEVEL)
+		Mode.ONLINE:
+			var slot := _my_fighter()
+			if _phase_is("RUNNING") and _session.state != null and slot >= 0:
+				return SparringBot.think(_session.state, _session.rules, slot, AUTO_LEVEL)
+		Mode.ROOM:
+			if _room_session != null:
+				return _room_session.autopilot_buttons(AUTO_LEVEL)
+	return 0
+
+
+## Whether there is a fight on that auto play could take over.
+func _can_auto() -> bool:
+	if _smoke != null or _panel_open() or _help_layer.visible:
+		return false
+	var shown: GameState = _arena.state
+	var mine := _my_fighter()
+	if shown == null or shown.match_over or mine < 0 or mine >= shown.fighters.size():
+		return false
+	match _mode:
+		Mode.PRACTICE:
+			return _p2_cpu # with two people at one keyboard, both play
+		Mode.ONLINE:
+			return _phase_is("RUNNING")
+		Mode.ROOM:
+			return _room_session.phase == RoomSession.Phase.PLAYING
+	return false
+
+
+## The auto play button goes under your own stats box; in a room, beside the clock.
+func _place_auto_button() -> void:
+	_auto_button.set_pressed_no_signal(_auto)
+	_auto_button.text = "Auto play: ON" if _auto else "Auto play"
+	_auto_button.modulate = Color("ffd23f") if _auto else Color.WHITE
+	if not _auto_button.visible:
+		return
+	_auto_button.reset_size()
+	if _mode == Mode.ROOM:
+		var view := get_viewport_rect().size
+		_auto_button.position = Vector2(view.x / 2 - 112.0 - _auto_button.size.x, ArenaView.BAR_MARGIN + 4.0)
+	else:
+		var box := _arena.player_box(_my_fighter())
+		_auto_button.position = Vector2(box.position.x, box.end.y + 8.0)
 
 
 ## A person's buttons on this device: P1 is keyboard, first pad and the touch controls. With one
@@ -1184,7 +1274,9 @@ func _refresh() -> void:
 		mine = int(_session.local_slot)
 	var shown: GameState = _arena.state
 	_touch.weapon = shown.fighters[mine].weapon if shown != null and mine >= 0 and mine < shown.fighters.size() else 0
+	_auto_button.visible = _can_auto()
 	_update_sound()
+	_place_auto_button()
 	_place_copy_button()
 	_place_again_button()
 	_refresh_panel()
@@ -1286,7 +1378,7 @@ func _refresh_practice() -> void:
 		# The fighter's own name on its box; the tag over its head says which is you.
 		var who := GameSettings.character if i == 0 else _cpu_character
 		names.append(ArtLibrary.fighter_name(who) if _smoke == null and who != "" else "P%d%s" % [i + 1, " CPU" if cpu else " YOU" if you else ""])
-		tags.append("CPU" if cpu else "YOU" if you else "")
+		tags.append("CPU" if cpu else ("AUTO" if _auto else "YOU") if you else "")
 	_arena.names = names
 	_arena.tags = tags
 	var nick := Nicknames.for_winner(_state)

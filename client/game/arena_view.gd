@@ -150,6 +150,13 @@ func status_bottom() -> float:
 	return h * STATUS_Y + 30.0 + 40.0 * status_small.size()
 
 
+## Where player i's stats box is in the bar along the top (not in a room, which has no boxes).
+func player_box(i: int) -> Rect2:
+	var k := _box_scale(get_viewport_rect().size, state.fighters.size() if state != null else 2)
+	var box_size := Vector2(BOX_MAX_WIDTH * k, BOX_HEIGHT * k)
+	return Rect2(Vector2(BAR_MARGIN + (box_size.x + BOX_GAP) * i, BAR_MARGIN), box_size)
+
+
 func _draw() -> void:
 	var font := ThemeDB.fallback_font
 	var size := get_viewport_rect().size
@@ -475,6 +482,8 @@ func _text(font: Font, text: String, centre_x: float, baseline_y: float, font_si
 
 ## How long each weapon is drawn, in metres, by the sim's weapon id.
 const WEAPON_LENGTH := [0.0, 0.95, 1.3, 0.6, 1.15, 0.75, 0.55, 0.95]
+## How long the weapon on a crate is drawn, in metres (three times the 0.55 it started at).
+const CRATE_WEAPON := 1.65
 const CRATE := Color("a0672c")
 const CRATE_EDGE := Color("5a3512")
 const BULLET := Color("ffe27a")
@@ -542,7 +551,17 @@ func _draw_props(shots: bool) -> void:
 				draw_rect(r, CRATE_EDGE, false, maxf(2.0, _ppm * 0.05))
 				draw_line(r.position, r.end, CRATE_EDGE, maxf(1.5, _ppm * 0.03))
 				draw_line(Vector2(r.end.x, r.position.y), Vector2(r.position.x, r.end.y), CRATE_EDGE, maxf(1.5, _ppm * 0.03))
-				_draw_weapon_sprite(p.weapon, centre, 0.55, 0.0, 1)
+				# The weapon inside, big enough to tell which it is from across the arena.
+				var tex := ArtLibrary.weapon_texture(p.weapon)
+				if tex == null:
+					_draw_weapon_sprite(p.weapon, centre, CRATE_WEAPON, 0.0, 1)
+				else:
+					var w := CRATE_WEAPON * _ppm
+					var h := w * tex.get_height() / maxf(1.0, tex.get_width())
+					if h > w: # a tall sprite: its height is the limit
+						w *= w / h
+						h = CRATE_WEAPON * _ppm
+					draw_texture_rect(tex, Rect2(Vector2(centre.x - w / 2.0, r.position.y + r.size.y * 0.35 - h / 2.0), Vector2(w, h)), false)
 			Weapons.PROP_ITEM:
 				var bob := sin(tick * 0.12) * _ppm * 0.06
 				draw_set_transform(Vector2(centre.x, r.end.y), 0.0, Vector2(1.0, 0.3))

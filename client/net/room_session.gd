@@ -73,6 +73,11 @@ var _connect_tick := 0
 var _buffer: Array[PackedByteArray] = []
 var _playing_back := false
 var _last_sent := -1
+# Auto play (autopilot_buttons): where our fighter was at the last frame seen, and its air jump.
+var _auto_x := 0
+var _auto_y := 0
+var _auto_frame := -1
+var _auto_air_jumped := false
 var _last_sent_tick := 0
 
 
@@ -128,6 +133,37 @@ func tick(buttons: int) -> void:
 	if phase == Phase.PLAYING:
 		_send_input(buttons)
 		_play_buffer()
+
+
+## The buttons a SparringBot would press for our fighter (auto play). The server's frames leave out
+## some of what the bot reads, so it is filled in here from what this side knows: the buttons we
+## last sent, our speed from the last two frames, whether we have jumped in the air, and that
+## crates and loose weapons are lying still. Close enough for a stand-in; it decides nothing in
+## the match, the server only ever gets buttons.
+func autopilot_buttons(level: int) -> int:
+	if state == null or rules == null or my_fighter < 0 or my_fighter >= state.fighters.size():
+		return 0
+	var me := state.fighters[my_fighter]
+	var last := maxi(_last_sent, 0)
+	me.previous_buttons = last
+	var gap := state.frame - _auto_frame
+	if gap != 0:
+		if _auto_frame >= 0 and gap > 0 and gap < 10:
+			me.vel_x = (me.pos_x - _auto_x) / gap
+			me.vel_y = (me.pos_y - _auto_y) / gap
+		_auto_x = me.pos_x
+		_auto_y = me.pos_y
+		_auto_frame = state.frame
+	if me.grounded:
+		_auto_air_jumped = false
+	me.air_jumps_left = 0 if _auto_air_jumped else 1
+	for p in state.props:
+		if p.kind == Weapons.PROP_BOX or p.kind == Weapons.PROP_ITEM:
+			p.grounded = true
+	var b := SparringBot.think(state, rules, my_fighter, level)
+	if not me.grounded and (b & Buttons.JUMP) != 0 and (last & Buttons.JUMP) == 0:
+		_auto_air_jumped = true
+	return b
 
 
 # ---- requests (the server checks who may do what) ----
