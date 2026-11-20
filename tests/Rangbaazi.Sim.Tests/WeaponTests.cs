@@ -448,7 +448,227 @@ public class WeaponTests
         Assert.Equal(WeaponId.Belan, Weapons.SignatureFor("akshat"));
         Assert.Equal(WeaponId.None, Weapons.SignatureFor("nobody"));
         var owners = new[] { "akshat", "shubham", "shahn", "salik", "rishabh", "ankit", "suhani" }.Select(Weapons.SignatureFor);
-        Assert.Equal(Weapons.Count - 1, owners.Distinct().Count());
+        Assert.Equal(7, owners.Distinct().Count()); // the five newer weapons have no owner yet
+    }
+
+    // ---- The newer weapons: boomerang, trampoline, mines, homing missile, black-hole bomb ----------
+
+    private static Fix Cm(int cm) => Fix.FromRatio(cm, 100);
+
+    [Fact]
+    public void TheBoomerangHitsOnItsWayOutAndComesBackToTheHand()
+    {
+        GameState s = Standing(0, 500);
+        Arm(s, 0, WeaponId.Boomerang);
+        Step(s, Buttons.Light);
+        Wait(s, 12);
+        Assert.Equal(WeaponId.None, s.Fighters[0].Weapon); // it has left the hand
+        Assert.Equal(1, Count(s, PropKind.Shot, ShotKind.Boomerang));
+        Wait(s, 120);
+        Assert.True(s.Fighters[1].Josh >= 9, "it hit on the way out");
+        Assert.Equal(0, s.Fighters[0].Josh);
+        Assert.Equal(WeaponId.Boomerang, s.Fighters[0].Weapon); // caught
+        Assert.Equal(3, s.Fighters[0].WeaponSupply);
+        Assert.Equal(0, Count(s, PropKind.Shot));
+    }
+
+    [Fact]
+    public void ABoomerangComingBackIsASweetSpot()
+    {
+        GameState s = Standing(0, 300);
+        s.Props[0] = new Prop
+        {
+            Kind = PropKind.Shot, Shot = ShotKind.Boomerang, Weapon = WeaponId.Boomerang, Owner = 0, OwnerClear = true,
+            Position = new FixVec2(Cm(420), Cm(70)), Velocity = new FixVec2(-Weapons.BoomerangSpeed, Fix.Zero), Timer = 1, Supply = 2,
+        };
+        Wait(s, 4);
+        Assert.Equal(8 * Weapons.SweetPercent / 100, s.Fighters[1].Josh);
+        Assert.True(s.Fighters[1].Velocity.X < Fix.Zero, "knocked the way it was flying");
+    }
+
+    [Fact]
+    public void ABoomerangNobodyCatchesLiesThereWithItsThrowsLeft()
+    {
+        GameState s = Standing(0);
+        Arm(s, 0, WeaponId.Belan); // hands full: it can't be caught
+        s.Props[0] = new Prop
+        {
+            Kind = PropKind.Shot, Shot = ShotKind.Boomerang, Weapon = WeaponId.Boomerang, Owner = 0, OwnerClear = true,
+            Position = new FixVec2(Cm(6000), Cm(70)), Timer = 1, Supply = 2, Age = Weapons.BoomerangFrames - 1,
+        };
+        s.Props[1] = s.Props[0] with { Supply = 0, Position = new FixVec2(Cm(7000), Cm(70)) };
+        Wait(s, 2);
+        Assert.Equal(0, Count(s, PropKind.Shot));
+        Prop left = Assert.Single(s.Props, p => p.Kind == PropKind.Item); // the empty one is gone
+        Assert.Equal(WeaponId.Boomerang, left.Weapon);
+        Assert.Equal(2, left.Supply);
+    }
+
+    [Fact]
+    public void ATrampolineBouncesAnyoneOnItButNotItsOwnerUntilTheyStepOff()
+    {
+        GameState s = Standing(0, 800);
+        Arm(s, 0, WeaponId.Trampoline);
+        Step(s, Buttons.Light);
+        Wait(s, 30);
+        Assert.Equal(1, Count(s, PropKind.Shot, ShotKind.Pad));
+        Assert.Equal(2, s.Fighters[0].WeaponSupply);
+        Assert.True(s.Fighters[0].Grounded, "the one who put it down is not thrown by it");
+
+        int pad = Array.FindIndex(s.Props, p => p.Shot == ShotKind.Pad);
+        s.Fighters[1].Position = new FixVec2(s.Props[pad].Position.X, Fix.Zero);
+        Step(s);
+        Assert.Equal(Weapons.PadLaunch, s.Fighters[1].Velocity.Y);
+        Assert.False(s.Fighters[1].Grounded);
+        Assert.Equal(0, s.Fighters[1].Josh); // it never hurts
+
+        Wait(s, Weapons.PadFrames);
+        Assert.Equal(0, Count(s, PropKind.Shot, ShotKind.Pad)); // gone after 10 s
+    }
+
+    [Fact]
+    public void AMineArmsAfterAMomentThenBurstsOnWhoeverTouchesIt()
+    {
+        GameState s = Standing(0, 600);
+        s.Props[0] = new Prop
+        {
+            Kind = PropKind.Shot, Shot = ShotKind.Mine, Weapon = WeaponId.Mines, Owner = 0, OwnerClear = true,
+            Position = new FixVec2(Cm(600), Fix.Zero), Grounded = true, Timer = Weapons.MineArmFrames,
+        };
+        Wait(s, Weapons.MineArmFrames - 2);
+        Assert.Equal(0, s.Fighters[1].Josh); // not armed yet
+        Wait(s, 3);
+        Assert.Equal(16 * Weapons.SweetPercent / 100, s.Fighters[1].Josh); // stepping on it is a direct hit
+        Assert.Equal(0, Count(s, PropKind.Shot));
+    }
+
+    [Fact]
+    public void AMineBurstsOnItsPlanterToo()
+    {
+        GameState s = Standing(0);
+        s.Props[0] = new Prop
+        {
+            Kind = PropKind.Shot, Shot = ShotKind.Mine, Weapon = WeaponId.Mines, Owner = 0, OwnerClear = true,
+            Position = FixVec2.Zero, Grounded = true,
+        };
+        Step(s);
+        Assert.Equal(16, s.Fighters[0].Josh);
+    }
+
+    [Fact]
+    public void AMineNobodyFoundBurstsByItselfAfterFifteenSeconds()
+    {
+        GameState s = Standing(0, 150);
+        s.Props[0] = new Prop
+        {
+            Kind = PropKind.Shot, Shot = ShotKind.Mine, Weapon = WeaponId.Mines, Owner = 0, OwnerClear = true,
+            Position = new FixVec2(Cm(260), Fix.Zero), Grounded = true, Age = Weapons.MineFrames - 2,
+        };
+        Step(s);
+        Assert.Equal(1, Count(s, PropKind.Shot, ShotKind.Mine));
+        Wait(s, 2);
+        Assert.Equal(0, Count(s, PropKind.Shot));
+        Assert.Equal(16, s.Fighters[1].Josh); // within its blast, but not standing on it: no sweet spot
+        Assert.Equal(0, s.Fighters[0].Josh);
+    }
+
+    [Fact]
+    public void PlantingAMineDoesNotSetItOffUnderThePlanter()
+    {
+        GameState s = Standing(0);
+        Arm(s, 0, WeaponId.Mines);
+        Step(s, Buttons.Light);
+        Wait(s, Weapons.MineArmFrames + 60);
+        Assert.Equal(1, Count(s, PropKind.Shot, ShotKind.Mine));
+        Assert.Equal(0, s.Fighters[0].Josh);
+        Assert.Equal(2, s.Fighters[0].WeaponSupply);
+    }
+
+    [Fact]
+    public void TheHomingMissileTurnsRoundToFindSomeoneBehindTheShooter()
+    {
+        GameState s = Standing(0, -600);
+        Arm(s, 0, WeaponId.HomingMissile);
+        Step(s, Buttons.Light); // facing right, away from them
+        Wait(s, 200);
+        Assert.Equal(15 * Weapons.SweetPercent / 100, s.Fighters[1].Josh);
+        Assert.Equal(0, s.Fighters[0].Josh);
+        Assert.Equal(1, s.Fighters[0].WeaponSupply);
+        Assert.Equal(0, Count(s, PropKind.Shot));
+    }
+
+    [Fact]
+    public void AMissileWithNobodyToChaseBurstsAfterFourSeconds()
+    {
+        GameState s = Standing(0);
+        Arm(s, 0, WeaponId.HomingMissile);
+        Step(s, Buttons.Light);
+        Wait(s, 100);
+        Assert.Equal(1, Count(s, PropKind.Shot, ShotKind.Missile));
+        Wait(s, Weapons.MissileFrames);
+        Assert.Equal(0, Count(s, PropKind.Shot));
+        Assert.Equal(0, s.Fighters[0].Josh);
+    }
+
+    [Fact]
+    public void TheBlackHolePullsEveryoneInThenBursts()
+    {
+        GameState s = Standing(3000, 300, -300);
+        s.Props[0] = new Prop
+        {
+            Kind = PropKind.Shot, Shot = ShotKind.Hole, Weapon = WeaponId.BlackHoleBomb, Owner = 0, OwnerClear = true,
+            Position = FixVec2.Zero, Grounded = true, Timer = Weapons.HoleFuse,
+        };
+        Wait(s, Weapons.HoleFuse - Weapons.HolePullFrames - 2);
+        Assert.Equal(Cm(300), s.Fighters[1].Position.X); // not pulling yet
+        Wait(s, 32);
+        Assert.True(Fix.Abs(s.Fighters[1].Position.X) < Cm(100), "pulled in from the right");
+        Assert.True(Fix.Abs(s.Fighters[2].Position.X) < Cm(100), "pulled in from the left");
+        Assert.Equal(0, s.Fighters[1].Josh);
+        Wait(s, Weapons.HolePullFrames);
+        Assert.Equal(20, s.Fighters[1].Josh);
+        Assert.Equal(20, s.Fighters[2].Josh);
+        Assert.Equal(0, s.Fighters[0].Josh); // 30 m away
+        Assert.Equal(0, Count(s, PropKind.Shot));
+    }
+
+    [Fact]
+    public void RollbackThroughABrawlWithTheNewerWeaponsMatchesTheOriginalTimeline()
+    {
+        // Four bots handed the five newer weapons in turn, with an 8-frame misprediction every 7 frames.
+        var rules = MatchRules.Room(Stages.Rooftops, 1);
+        const int frames = 60 * 40;
+        var reference = Simulation.CreateInitialState(rules, 4, 91);
+        var live = Simulation.CreateInitialState(rules, 4, 91);
+        Buttons[] Think(GameState g) => Enumerable.Range(0, 4).Select(p => SparringBot.Think(g, rules, p, CpuLevel.Hard)).ToArray();
+        var seen = new int[11];
+        for (int f = 0; f < frames; f++)
+        {
+            if (f % 90 == 0)
+                foreach (GameState g in new[] { reference, live })
+                    for (int p = 0; p < 4; p++)
+                    {
+                        if (!g.Fighters[p].IsActive) continue;
+                        var w = (WeaponId)((int)WeaponId.Boomerang + (f / 90 + p) % 5);
+                        g.Fighters[p].Weapon = w;
+                        g.Fighters[p].WeaponSupply = Weapons.Get(w).Supply;
+                    }
+            Buttons[] inputs = Think(reference);
+            Simulation.Advance(reference, rules, inputs);
+            foreach (Prop p in reference.Props)
+                if (p.Kind == PropKind.Shot) seen[(int)p.Shot]++;
+
+            if (f % 7 == 0)
+            {
+                GameState saved = live.Clone();
+                for (int k = 0; k < 8; k++) Simulation.Advance(live, rules, new Buttons[] { Buttons.Light, Buttons.DropWeapon, Buttons.Right, Buttons.Heavy });
+                live.CopyFrom(saved);
+            }
+            Simulation.Advance(live, rules, inputs);
+            Assert.Equal(reference.Checksum(), live.Checksum());
+        }
+        foreach (ShotKind kind in new[] { ShotKind.Boomerang, ShotKind.Pad, ShotKind.Mine, ShotKind.Missile, ShotKind.Hole })
+            Assert.True(seen[(int)kind] > 0, $"no {kind} was ever on the stage");
     }
 
     // ---- Off, and rollback ----------------------------------------------------------------------------

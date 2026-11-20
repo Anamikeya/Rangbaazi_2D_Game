@@ -19,7 +19,7 @@ internal static class ArenaLimits
     /// fighter's last hit and main weapon. Older clients are turned away with a message to update,
     /// instead of misreading the frames.
     /// </summary>
-    public const int ProtocolVersion = 3;
+    public const int ProtocolVersion = 4;
     public const int MinMinutes = 10;
     public const int MaxMinutes = 15;
     public const int DefaultMinutes = 10;
@@ -215,7 +215,7 @@ internal static class ArenaBinary
     public const byte State = 2;
     public const int HeaderBytes = 12;
     public const int FighterBytes = 31;
-    public const int PropBytes = 12;
+    public const int PropBytes = 13;
 
     /// <summary>Every defined button (Left to Taunt); anything else is masked off.</summary>
     public const ushort KnownButtons = (1 << 11) - 1;
@@ -243,9 +243,10 @@ internal static class ArenaBinary
     /// used, 16 air dodge used), action frame (u16), Josh, KOs, falls (u16 each), hit-stop, armor
     /// (u8), Guts timer (u16), hitstun, dodge cooldown, weapon, weapon supply (u8), the last
     /// hit taken (u8: its weapon, +128 for a sweet spot), the hit count (u8, wrapping), and the main
-    /// weapon so far (u8: 0-7, or 15 for an all-rounder, +128 for a master). Then the props
+    /// weapon so far (u8: 0-12, or 15 for an all-rounder, +128 for a master). Then the props
     /// in use: count (u8), and per prop: kind, weapon, shot kind (u8), x, y (i32 raw), facing of its
-    /// flight (i8: -1, 0, 1).
+    /// flight (i8: -1, 0, 1), and its timer (u8, capped at 255: a fuse, a mine arming, a
+    /// boomerang's leg).
     /// Little-endian.
     /// </summary>
     public static byte[] EncodeState(GameState state, MatchRules rules)
@@ -299,6 +300,7 @@ internal static class ArenaBinary
             BinaryPrimitives.WriteInt32LittleEndian(s[(o + 3)..], ClampRaw(p.Position.X.Raw));
             BinaryPrimitives.WriteInt32LittleEndian(s[(o + 7)..], ClampRaw(p.Position.Y.Raw));
             s[o + 11] = (byte)(sbyte)(p.Velocity.X.Raw > 0 ? 1 : p.Velocity.X.Raw < 0 ? -1 : 0);
+            s[o + 12] = U8(p.Timer);
             o += PropBytes;
         }
         return bytes;

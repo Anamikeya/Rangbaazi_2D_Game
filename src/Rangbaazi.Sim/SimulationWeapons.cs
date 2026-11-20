@@ -57,11 +57,34 @@ public static partial class Simulation
                     AddShot(state, ShotKind.Arrow, f.Weapon, i, hand, new FixVec2(Weapons.ArrowSpeed * f.Facing, Fix.Zero), false);
                     if (f.WeaponSupply > 0) f.WeaponSupply--;
                     break;
+                case MoveId.BoomerangThrow:
+                    // It leaves the hand carrying the throws it has left, and brings them back.
+                    AddShot(state, ShotKind.Boomerang, f.Weapon, i, hand, new FixVec2(Weapons.BoomerangSpeed * f.Facing, Fix.Zero), false,
+                        Math32.Max(0, f.WeaponSupply - 1));
+                    f.Weapon = WeaponId.None;
+                    f.WeaponSupply = 0;
+                    break;
+                case MoveId.PadPlace:
+                    AddShot(state, ShotKind.Pad, f.Weapon, i, new FixVec2(hand.X, f.Position.Y), FixVec2.Zero, f.Grounded);
+                    if (f.WeaponSupply > 0) f.WeaponSupply--;
+                    break;
+                case MoveId.MinePlant:
+                    AddShot(state, ShotKind.Mine, f.Weapon, i, new FixVec2(hand.X, f.Position.Y), FixVec2.Zero, f.Grounded);
+                    if (f.WeaponSupply > 0) f.WeaponSupply--;
+                    break;
+                case MoveId.MissileFire:
+                    AddShot(state, ShotKind.Missile, f.Weapon, i, hand, new FixVec2(Weapons.MissileSpeed * f.Facing, Fix.Zero), false);
+                    if (f.WeaponSupply > 0) f.WeaponSupply--;
+                    break;
+                case MoveId.HoleLob:
+                    AddShot(state, ShotKind.Hole, f.Weapon, i, hand, new FixVec2(Weapons.BombVx * f.Facing, Weapons.BombVy), false);
+                    if (f.WeaponSupply > 0) f.WeaponSupply--;
+                    break;
             }
         }
     }
 
-    private static void AddShot(GameState state, ShotKind kind, WeaponId weapon, int owner, FixVec2 at, FixVec2 velocity, bool grounded)
+    private static void AddShot(GameState state, ShotKind kind, WeaponId weapon, int owner, FixVec2 at, FixVec2 velocity, bool grounded, int supply = 0)
     {
         int slot = FreeSlot(state, forShot: true);
         if (slot < 0) return;
@@ -72,10 +95,19 @@ public static partial class Simulation
             Weapon = weapon,
             Shot = kind,
             Owner = owner,
-            Position = new FixVec2(at.X, kind == ShotKind.Roll ? at.Y : at.Y - h),
+            Supply = supply,
+            // The ball, a trampoline and a mine start at the feet; the rest leave the hand.
+            Position = new FixVec2(at.X, kind == ShotKind.Roll || kind == ShotKind.Pad || kind == ShotKind.Mine ? at.Y : at.Y - h),
             Velocity = velocity,
             Grounded = grounded,
-            Timer = kind == ShotKind.Bomb ? Weapons.BombFuse : 0,
+            Timer = kind switch
+            {
+                ShotKind.Bomb => Weapons.BombFuse,
+                ShotKind.Pad => Weapons.PadFrames,
+                ShotKind.Mine => Weapons.MineArmFrames,
+                ShotKind.Hole => Weapons.HoleFuse,
+                _ => 0,
+            },
         };
     }
 
@@ -164,20 +196,7 @@ public static partial class Simulation
         {
             case ShotKind.Roll:
                 Fall(ref p, rules.Stage, Weapons.ShotGravity, platforms: true);
-                if (p.Age >= Weapons.RollFrames)
-                {
-                    // It stops and lies there: anyone can pick it up and roll it again.
-                    p.Kind = PropKind.Item;
-                    p.Shot = ShotKind.None;
-                    p.Supply = 1;
-                    p.Owner = -1;
-                    p.OwnerClear = false;
-                    p.Velocity = FixVec2.Zero;
-                    p.Timer = 0;
-                    p.Age = 0;
-                    p.HitMask = 0;
-                    p.Hits = 0;
-                }
+                if (p.Age >= Weapons.RollFrames) Rest(ref p, 1); // it stops and lies there: anyone can roll it again
                 break;
             case ShotKind.Bullet:
                 p.Position = p.Position + p.Velocity;
@@ -202,6 +221,30 @@ public static partial class Simulation
                 Fall(ref p, rules.Stage, Weapons.ShotGravity, platforms: true);
                 if (p.Grounded) p.Velocity.X = Fix.MoveToward(p.Velocity.X, Fix.Zero, Fix.FromRatio(2, 100));
                 break;
+            case ShotKind.Boomerang:
+                if (!MoveBoomerang(state, ref p)) return;
+                break;
+            case ShotKind.Pad:
+                Fall(ref p, rules.Stage, Weapons.ShotGravity, platforms: true);
+                if (--p.Timer <= 0)
+                {
+                    p = default;
+                    return;
+                }
+                break;
+            case ShotKind.Mine:
+                Fall(ref p, rules.Stage, Weapons.ShotGravity, platforms: true);
+                if (p.Timer > 0) p.Timer--;
+                break;
+            case ShotKind.Missile:
+                SteerMissile(state, ref p, rules);
+                p.Position = p.Position + p.Velocity;
+                break;
+            case ShotKind.Hole:
+                p.Timer--;
+                Fall(ref p, rules.Stage, Weapons.ShotGravity, platforms: true);
+                if (p.Grounded) p.Velocity.X = Fix.MoveToward(p.Velocity.X, Fix.Zero, Fix.FromRatio(2, 100));
+                break;
             case ShotKind.Thrown:
                 Fall(ref p, rules.Stage, Weapons.ShotGravity, platforms: true);
                 if (p.Grounded)
@@ -216,6 +259,91 @@ public static partial class Simulation
             if (p.Shot == ShotKind.Bullet) MissBullet(state, in p);
             p = default;
         }
+    }
+
+    /// <summary>
+    /// A shot comes to rest as a loose weapon anyone can pick up. It keeps its speed downwards
+    /// and whether it was on the ground, as the bowling ball always has.
+    /// </summary>
+    private static void Rest(ref Prop p, int supply)
+    {
+        p.Kind = PropKind.Item;
+        p.Shot = ShotKind.None;
+        p.Supply = supply;
+        p.Owner = -1;
+        p.OwnerClear = false;
+        p.Velocity = FixVec2.Zero;
+        p.Timer = 0;
+        p.Age = 0;
+        p.HitMask = 0;
+        p.Hits = 0;
+    }
+
+    /// <summary>
+    /// The boomerang's flight: out, slowing to a stop (leg 0), then back to its thrower's hand
+    /// (leg 1), able to hit everyone again. Not caught in time, or its thrower gone, it drops and
+    /// lies there with the throws it has left (an empty one is gone). False when it is gone.
+    /// </summary>
+    private static bool MoveBoomerang(GameState state, ref Prop p)
+    {
+        bool owned = p.Owner >= 0 && p.Owner < state.Fighters.Length && state.Fighters[p.Owner].IsActive;
+        if (p.Age >= Weapons.BoomerangFrames || (p.Timer != 0 && !owned))
+        {
+            if (p.Supply > 0)
+            {
+                Rest(ref p, p.Supply);
+                p.Grounded = false;
+            }
+            else p = default;
+            return false;
+        }
+        if (p.Timer == 0)
+        {
+            p.Velocity.X = Fix.MoveToward(p.Velocity.X, Fix.Zero, Weapons.BoomerangDrag);
+            if (p.Velocity.X == Fix.Zero)
+            {
+                p.Timer = 1;
+                p.HitMask = 0;
+            }
+        }
+        else
+        {
+            ref Fighter o = ref state.Fighters[p.Owner];
+            Fix dx = o.Position.X - p.Position.X;
+            Fix dy = o.Position.Y + Weapons.HandHeight - Weapons.ShotHalf(ShotKind.Boomerang) - p.Position.Y;
+            p.Velocity.X = Fix.MoveToward(p.Velocity.X, Weapons.BoomerangSpeed * Fix.Sign(dx), Weapons.BoomerangDrag * 2);
+            p.Velocity.Y = Fix.Clamp(dy, -Weapons.BoomerangClimb, Weapons.BoomerangClimb);
+        }
+        p.Position = p.Position + p.Velocity;
+        return true;
+    }
+
+    /// <summary>
+    /// The missile turns a little each frame towards the nearest fighter who isn't its owner (on a
+    /// tie, the lower index); with nobody to chase it flies on.
+    /// </summary>
+    private static void SteerMissile(GameState state, ref Prop p, MatchRules rules)
+    {
+        Fighter[] fighters = state.Fighters;
+        Fix cy = p.Position.Y + Weapons.ShotHalf(ShotKind.Missile);
+        int target = -1;
+        Fix best = Fix.Zero;
+        for (int d = 0; d < fighters.Length; d++)
+        {
+            if (d == p.Owner || !fighters[d].IsActive) continue;
+            Fix dist = Fix.Abs(fighters[d].Position.X - p.Position.X) + Fix.Abs(fighters[d].Position.Y + rules.Tuning.Height / 2 - cy);
+            if (target < 0 || dist < best)
+            {
+                target = d;
+                best = dist;
+            }
+        }
+        if (target < 0) return;
+        Fix dx = fighters[target].Position.X - p.Position.X;
+        Fix dy = fighters[target].Position.Y + rules.Tuning.Height / 2 - cy;
+        int up = Fix.Abs(dy) <= Weapons.MissileLevel ? 0 : Fix.Sign(dy);
+        p.Velocity.X = Fix.MoveToward(p.Velocity.X, Weapons.MissileSpeed * Fix.Sign(dx), Weapons.MissileTurn);
+        p.Velocity.Y = Fix.MoveToward(p.Velocity.Y, Weapons.MissileSpeed * up, Weapons.MissileTurn);
     }
 
     /// <summary>An Uzi bullet that hit nobody breaks its shooter's streak.</summary>
@@ -239,6 +367,17 @@ public static partial class Simulation
             if (!p.OwnerClear && (p.Owner < 0 || !fighters[p.Owner].IsActive || !box.Overlaps(Hurtbox(in fighters[p.Owner], t))))
                 p.OwnerClear = true;
 
+            if (p.Shot == ShotKind.Pad)
+            {
+                Bounce(state, in p, box, rules);
+                continue;
+            }
+            if (p.Shot == ShotKind.Mine)
+            {
+                TripMine(state, i, box, rules);
+                continue;
+            }
+
             // A bat swing bats it back: it becomes the batter's, reversed and 1.25x faster.
             for (int b = 0; b < fighters.Length; b++)
             {
@@ -251,12 +390,20 @@ public static partial class Simulation
                 p.Hits = 0;
                 p.Velocity = new FixVec2(Fix.Abs(p.Velocity.X) * Weapons.SweetPercent / 100 * batter.Facing, p.Velocity.Y);
                 if (p.Shot == ShotKind.Bullet || p.Shot == ShotKind.Arrow) p.Age = 0;
+                if (p.Shot == ShotKind.Boomerang) p.Timer = 0; // it flies out again, and comes back to the batter
                 break;
             }
 
-            if (p.Shot == ShotKind.Bomb && p.Timer <= 0)
+            if (((p.Shot == ShotKind.Bomb || p.Shot == ShotKind.Hole) && p.Timer <= 0)
+                || (p.Shot == ShotKind.Missile && p.Age >= Weapons.MissileFrames))
             {
                 Explode(state, i, -1, rules);
+                continue;
+            }
+            if (p.Shot == ShotKind.Hole)
+            {
+                // It doesn't burst on touch: for the end of its fuse it pulls everyone near it in.
+                if (p.Timer <= Weapons.HolePullFrames) Pull(state, in p, rules);
                 continue;
             }
 
@@ -267,7 +414,19 @@ public static partial class Simulation
                 if (d == p.Owner && !p.OwnerClear) continue;
                 if (!box.Overlaps(Hurtbox(in def, t))) continue;
 
-                if (p.Shot == ShotKind.Bomb)
+                if (p.Shot == ShotKind.Boomerang && d == p.Owner)
+                {
+                    // Back to the hand: caught on the way back, empty-handed. Otherwise it flies past.
+                    if (p.Timer == 0 || def.Weapon != WeaponId.None) continue;
+                    def.Weapon = p.Weapon;
+                    def.WeaponSupply = p.Supply;
+                    def.UziShots = 0;
+                    def.UziStreak = 0;
+                    def.UziTarget = 0;
+                    p = default;
+                    break;
+                }
+                if (p.Shot == ShotKind.Bomb || p.Shot == ShotKind.Missile)
                 {
                     if (d == p.Owner) continue; // it bursts on touching anyone but its thrower
                     Explode(state, i, d, rules);
@@ -294,6 +453,65 @@ public static partial class Simulation
     }
 
     /// <summary>
+    /// A trampoline bounces up everyone touching it who isn't already rising, its owner too once
+    /// they have stepped off it. It does no damage and credits nobody.
+    /// </summary>
+    private static void Bounce(GameState state, in Prop p, FixRect box, MatchRules rules)
+    {
+        Fighter[] fighters = state.Fighters;
+        for (int d = 0; d < fighters.Length; d++)
+        {
+            ref Fighter f = ref fighters[d];
+            if (!f.IsActive || IsIntangible(in f, rules.Tuning) || f.Action == FighterAction.Hitstun) continue;
+            if (d == p.Owner && !p.OwnerClear) continue;
+            if (f.Velocity.Y > Fix.Zero || !box.Overlaps(Hurtbox(in f, rules.Tuning))) continue;
+            f.Velocity.Y = Weapons.PadLaunch;
+            f.Grounded = false;
+        }
+    }
+
+    /// <summary>
+    /// An armed mine bursts on the first fighter touching it, its planter included. One that
+    /// nobody found bursts by itself after 15 s.
+    /// </summary>
+    private static void TripMine(GameState state, int index, FixRect box, MatchRules rules)
+    {
+        if (state.Props[index].Age >= Weapons.MineFrames)
+        {
+            Explode(state, index, -1, rules);
+            return;
+        }
+        if (state.Props[index].Timer > 0) return;
+        int owner = state.Props[index].Owner;
+        bool ownerClear = state.Props[index].OwnerClear;
+        Fighter[] fighters = state.Fighters;
+        for (int d = 0; d < fighters.Length; d++)
+        {
+            ref Fighter f = ref fighters[d];
+            if (!f.IsActive || IsIntangible(in f, rules.Tuning)) continue;
+            if (d == owner && !ownerClear) continue;
+            if (!box.Overlaps(Hurtbox(in f, rules.Tuning))) continue;
+            Explode(state, index, d, rules);
+            return;
+        }
+    }
+
+    /// <summary>The black hole drags everyone within reach sideways towards it.</summary>
+    private static void Pull(GameState state, in Prop p, MatchRules rules)
+    {
+        Fighter[] fighters = state.Fighters;
+        Fix cy = p.Position.Y + Weapons.ShotHalf(ShotKind.Hole);
+        for (int d = 0; d < fighters.Length; d++)
+        {
+            ref Fighter f = ref fighters[d];
+            if (!f.IsActive || IsIntangible(in f, rules.Tuning)) continue;
+            Fix dx = p.Position.X - f.Position.X;
+            if (Fix.Abs(dx) > Weapons.HoleReach || Fix.Abs(f.Position.Y + rules.Tuning.Height / 2 - cy) > Weapons.HoleReach) continue;
+            f.Position.X += Fix.Clamp(dx, -Weapons.HolePull, Weapons.HolePull);
+        }
+    }
+
+    /// <summary>
     /// A projectile hits a fighter, its owner included. Sweet spots (never on yourself): the ball's
     /// second and later fighters ("Strike!"), the Uzi from the 6th bullet in a row on one target,
     /// an arrow that flew far (a long shot), a thrown weapon on an airborne target.
@@ -309,6 +527,7 @@ public static partial class Simulation
             ShotKind.Roll => MoveId.BallRoll,
             ShotKind.Bullet => MoveId.UziFire,
             ShotKind.Arrow => MoveId.BowShot,
+            ShotKind.Boomerang => MoveId.BoomerangThrow,
             _ => MoveId.WeaponThrow,
         };
         var hit = new Hit(rules.Tuning.Moves[move]);
@@ -339,6 +558,9 @@ public static partial class Simulation
             case ShotKind.Arrow:
                 if (!self && p.Age >= Weapons.LongShotFrames) hit.Sweeten();
                 break;
+            case ShotKind.Boomerang:
+                if (!self && p.Timer != 0) hit.Sweeten(); // caught by it on its way back
+                break;
             case ShotKind.Thrown:
                 hit.Damage = Weapons.Get(p.Weapon).ThrowDamage;
                 if (!self && !fighters[target].Grounded) hit.Sweeten();
@@ -351,16 +573,25 @@ public static partial class Simulation
     }
 
     /// <summary>
-    /// A cherry bomb bursts: a 2.4 m box that hits everyone in it, its thrower too, launching them
-    /// away from its centre. A fighter it burst on is a direct hit (a sweet spot).
+    /// A cherry bomb, mine, missile or black hole bursts: a 2.4 m box (the hole's is 3.6 m) that
+    /// hits everyone in it, its thrower too, launching them away from its centre. A fighter it
+    /// burst on is a direct hit (a sweet spot).
     /// </summary>
     private static void Explode(GameState state, int index, int direct, MatchRules rules)
     {
         Prop p = state.Props[index];
         state.Props[index] = default;
         Fighter[] fighters = state.Fighters;
-        Fix cy = p.Position.Y + Weapons.ShotHalf(ShotKind.Bomb);
-        var blast = new FixRect(p.Position.X - Weapons.BlastHalf, cy - Weapons.BlastHalf, p.Position.X + Weapons.BlastHalf, cy + Weapons.BlastHalf);
+        Fix cy = p.Position.Y + Weapons.ShotHalf(p.Shot);
+        Fix half = p.Shot == ShotKind.Hole ? Weapons.HoleBlastHalf : Weapons.BlastHalf;
+        MoveData burst = p.Shot switch
+        {
+            ShotKind.Mine => Weapons.MinePlant,
+            ShotKind.Missile => Weapons.MissileFire,
+            ShotKind.Hole => Weapons.HoleLob,
+            _ => Weapons.BombLob,
+        };
+        var blast = new FixRect(p.Position.X - half, cy - half, p.Position.X + half, cy + half);
         int owner = p.Owner;
         for (int d = 0; d < fighters.Length; d++)
         {
@@ -368,7 +599,7 @@ public static partial class Simulation
             if (!def.IsActive || IsIntangible(in def, rules.Tuning)) continue;
             if (!blast.Overlaps(Hurtbox(in def, rules.Tuning))) continue;
             int from = owner >= 0 ? owner : d;
-            var hit = new Hit(Weapons.BombLob);
+            var hit = new Hit(burst);
             if (d == direct && from != d) hit.Sweeten();
             if (rules.SignatureOf(from) == p.Weapon) hit.Percent = hit.Percent * Weapons.SignaturePercent / 100;
             hit.Weapon = p.Weapon;

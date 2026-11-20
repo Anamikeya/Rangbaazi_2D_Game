@@ -169,12 +169,17 @@ static func _ranged_reach(w: int) -> int:
 		Weapons.BOWLING_BALL: return Fx.from_int(12)
 		Weapons.CHERRY_BOMBS: return Fx.from_int(6)
 		Weapons.BOW: return Fx.from_int(15)
+		Weapons.BOOMERANG: return Fx.from_int(8)
+		Weapons.HOMING_MISSILE: return Fx.from_int(14)
+		Weapons.BLACK_HOLE_BOMB: return Fx.from_int(6)
 	return 0
 
 
 ## Closer than this, lobbing a bomb would land it behind them (or on the bot).
 static func _ranged_min(w: int) -> int:
-	return Fx.ratio(5, 2) if w == Weapons.CHERRY_BOMBS else 0
+	if w == Weapons.HOMING_MISSILE:
+		return Fx.from_int(3) # any closer and its burst catches the shooter
+	return Fx.ratio(5, 2) if w == Weapons.CHERRY_BOMBS or w == Weapons.BLACK_HOLE_BOMB else 0
 
 
 ## The nearest box or loose weapon resting on this platform within 5 m, or -1.

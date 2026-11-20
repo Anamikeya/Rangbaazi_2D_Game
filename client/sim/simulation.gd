@@ -11,7 +11,7 @@ const TICKS_PER_SECOND := 60
 
 ## Bump when the sim's behaviour changes on purpose: online players with different versions
 ## refuse to play each other instead of desyncing.
-const SIM_VERSION := 6 # 6: arena side blast zones at the screen's edge (17.2 m)
+const SIM_VERSION := 7 # 7: boomerang, trampoline, mines, homing missile, black-hole bomb
 
 ## Most fighters in one match: online rooms hold up to 15 players (one spare slot).
 const MAX_FIGHTERS := 16
@@ -819,9 +819,31 @@ static func _fire_shots(state: GameState, frozen: Array[bool], rules: MatchRules
 				_add_shot(state, Weapons.SHOT_ARROW, f.weapon, i, hand_x, hand_y, Weapons.ARROW_SPEED * f.facing, 0, false)
 				if f.weapon_supply > 0:
 					f.weapon_supply -= 1
+			MoveData.Id.BOOMERANG_THROW:
+				# It leaves the hand carrying the throws it has left, and brings them back.
+				_add_shot(state, Weapons.SHOT_BOOMERANG, f.weapon, i, hand_x, hand_y, Weapons.BOOMERANG_SPEED * f.facing, 0, false,
+					maxi(0, f.weapon_supply - 1))
+				f.weapon = Weapons.NONE
+				f.weapon_supply = 0
+			MoveData.Id.PAD_PLACE:
+				_add_shot(state, Weapons.SHOT_PAD, f.weapon, i, hand_x, f.pos_y, 0, 0, f.grounded)
+				if f.weapon_supply > 0:
+					f.weapon_supply -= 1
+			MoveData.Id.MINE_PLANT:
+				_add_shot(state, Weapons.SHOT_MINE, f.weapon, i, hand_x, f.pos_y, 0, 0, f.grounded)
+				if f.weapon_supply > 0:
+					f.weapon_supply -= 1
+			MoveData.Id.MISSILE_FIRE:
+				_add_shot(state, Weapons.SHOT_MISSILE, f.weapon, i, hand_x, hand_y, Weapons.MISSILE_SPEED * f.facing, 0, false)
+				if f.weapon_supply > 0:
+					f.weapon_supply -= 1
+			MoveData.Id.HOLE_LOB:
+				_add_shot(state, Weapons.SHOT_HOLE, f.weapon, i, hand_x, hand_y, Weapons.BOMB_VX * f.facing, Weapons.BOMB_VY, false)
+				if f.weapon_supply > 0:
+					f.weapon_supply -= 1
 
 
-static func _add_shot(state: GameState, kind: int, weapon: int, owner: int, at_x: int, at_y: int, vx: int, vy: int, grounded: bool) -> void:
+static func _add_shot(state: GameState, kind: int, weapon: int, owner: int, at_x: int, at_y: int, vx: int, vy: int, grounded: bool, supply := 0) -> void:
 	var slot := _free_slot(state, true)
 	if slot < 0:
 		return
@@ -833,11 +855,18 @@ static func _add_shot(state: GameState, kind: int, weapon: int, owner: int, at_x
 	p.shot = kind
 	p.owner = owner
 	p.pos_x = at_x
-	p.pos_y = at_y if kind == Weapons.SHOT_ROLL else at_y - h
+	p.supply = supply
+	# The ball, a trampoline and a mine start at the feet; the rest leave the hand.
+	p.pos_y = at_y if kind == Weapons.SHOT_ROLL or kind == Weapons.SHOT_PAD or kind == Weapons.SHOT_MINE else at_y - h
 	p.vel_x = vx
 	p.vel_y = vy
 	p.grounded = grounded
-	p.timer = Weapons.BOMB_FUSE if kind == Weapons.SHOT_BOMB else 0
+	match kind:
+		Weapons.SHOT_BOMB: p.timer = Weapons.BOMB_FUSE
+		Weapons.SHOT_PAD: p.timer = Weapons.PAD_FRAMES
+		Weapons.SHOT_MINE: p.timer = Weapons.MINE_ARM_FRAMES
+		Weapons.SHOT_HOLE: p.timer = Weapons.HOLE_FUSE
+		_: p.timer = 0
 
 
 ## The first empty prop slot. A shot that finds none replaces the oldest bullet; boxes wait.
@@ -915,18 +944,7 @@ static func _move_shot(state: GameState, index: int, rules: MatchRules) -> void:
 		Weapons.SHOT_ROLL:
 			_fall(p, rules.stage, Weapons.SHOT_GRAVITY, true)
 			if p.age >= Weapons.ROLL_FRAMES:
-				# It stops and lies there: anyone can pick it up and roll it again.
-				p.kind = Weapons.PROP_ITEM
-				p.shot = Weapons.SHOT_NONE
-				p.supply = 1
-				p.owner = -1
-				p.owner_clear = false
-				p.vel_x = 0
-				p.vel_y = 0
-				p.timer = 0
-				p.age = 0
-				p.hit_mask = 0
-				p.hits = 0
+				_rest(p, 1) # it stops and lies there: anyone can roll it again
 		Weapons.SHOT_BULLET:
 			p.pos_x += p.vel_x
 			p.pos_y += p.vel_y
@@ -946,6 +964,28 @@ static func _move_shot(state: GameState, index: int, rules: MatchRules) -> void:
 			_fall(p, rules.stage, Weapons.SHOT_GRAVITY, true)
 			if p.grounded:
 				p.vel_x = Fx.move_toward(p.vel_x, 0, Fx.ratio(2, 100))
+		Weapons.SHOT_BOOMERANG:
+			if not _move_boomerang(state, p):
+				return
+		Weapons.SHOT_PAD:
+			_fall(p, rules.stage, Weapons.SHOT_GRAVITY, true)
+			p.timer -= 1
+			if p.timer <= 0:
+				p.clear()
+				return
+		Weapons.SHOT_MINE:
+			_fall(p, rules.stage, Weapons.SHOT_GRAVITY, true)
+			if p.timer > 0:
+				p.timer -= 1
+		Weapons.SHOT_MISSILE:
+			_steer_missile(state, p, rules)
+			p.pos_x += p.vel_x
+			p.pos_y += p.vel_y
+		Weapons.SHOT_HOLE:
+			p.timer -= 1
+			_fall(p, rules.stage, Weapons.SHOT_GRAVITY, true)
+			if p.grounded:
+				p.vel_x = Fx.move_toward(p.vel_x, 0, Fx.ratio(2, 100))
 		Weapons.SHOT_THROWN:
 			_fall(p, rules.stage, Weapons.SHOT_GRAVITY, true)
 			if p.grounded:
@@ -955,6 +995,73 @@ static func _move_shot(state: GameState, index: int, rules: MatchRules) -> void:
 		if p.shot == Weapons.SHOT_BULLET:
 			_miss_bullet(state, p)
 		p.clear()
+
+
+## A shot comes to rest as a loose weapon anyone can pick up. It keeps whether it was on the ground,
+## as the bowling ball always has.
+static func _rest(p: Prop, supply: int) -> void:
+	p.kind = Weapons.PROP_ITEM
+	p.shot = Weapons.SHOT_NONE
+	p.supply = supply
+	p.owner = -1
+	p.owner_clear = false
+	p.vel_x = 0
+	p.vel_y = 0
+	p.timer = 0
+	p.age = 0
+	p.hit_mask = 0
+	p.hits = 0
+
+
+## The boomerang's flight: out, slowing to a stop (leg 0), then back to its thrower's hand (leg 1),
+## able to hit everyone again. Not caught in time, or its thrower gone, it drops and lies there with
+## the throws it has left (an empty one is gone). False when it is gone.
+static func _move_boomerang(state: GameState, p: Prop) -> bool:
+	var owned := p.owner >= 0 and p.owner < state.fighters.size() and state.fighters[p.owner].is_active()
+	if p.age >= Weapons.BOOMERANG_FRAMES or (p.timer != 0 and not owned):
+		if p.supply > 0:
+			_rest(p, p.supply)
+			p.grounded = false
+		else:
+			p.clear()
+		return false
+	if p.timer == 0:
+		p.vel_x = Fx.move_toward(p.vel_x, 0, Weapons.BOOMERANG_DRAG)
+		if p.vel_x == 0:
+			p.timer = 1
+			p.hit_mask = 0
+	else:
+		var o := state.fighters[p.owner]
+		var dx := o.pos_x - p.pos_x
+		var dy := o.pos_y + Weapons.HAND_HEIGHT - Weapons.shot_half(Weapons.SHOT_BOOMERANG) - p.pos_y
+		p.vel_x = Fx.move_toward(p.vel_x, Weapons.BOOMERANG_SPEED * signi(dx), Weapons.BOOMERANG_DRAG * 2)
+		p.vel_y = clampi(dy, -Weapons.BOOMERANG_CLIMB, Weapons.BOOMERANG_CLIMB)
+	p.pos_x += p.vel_x
+	p.pos_y += p.vel_y
+	return true
+
+
+## The missile turns a little each frame towards the nearest fighter who isn't its owner (on a tie,
+## the lower index); with nobody to chase it flies on.
+static func _steer_missile(state: GameState, p: Prop, rules: MatchRules) -> void:
+	var fighters := state.fighters
+	var cy := p.pos_y + Weapons.shot_half(Weapons.SHOT_MISSILE)
+	var target := -1
+	var best := 0
+	for d in fighters.size():
+		if d == p.owner or not fighters[d].is_active():
+			continue
+		var dist := absi(fighters[d].pos_x - p.pos_x) + absi(fighters[d].pos_y + rules.tuning.height / 2 - cy)
+		if target < 0 or dist < best:
+			target = d
+			best = dist
+	if target < 0:
+		return
+	var dx := fighters[target].pos_x - p.pos_x
+	var dy := fighters[target].pos_y + rules.tuning.height / 2 - cy
+	var up := 0 if absi(dy) <= Weapons.MISSILE_LEVEL else signi(dy)
+	p.vel_x = Fx.move_toward(p.vel_x, Weapons.MISSILE_SPEED * signi(dx), Weapons.MISSILE_TURN)
+	p.vel_y = Fx.move_toward(p.vel_y, Weapons.MISSILE_SPEED * up, Weapons.MISSILE_TURN)
 
 
 ## An Uzi bullet that hit nobody breaks its shooter's streak.
@@ -977,6 +1084,13 @@ static func _shot_hits(state: GameState, frozen: Array[bool], rules: MatchRules)
 		if not p.owner_clear and (p.owner < 0 or not fighters[p.owner].is_active() or not box.overlaps(hurtbox(fighters[p.owner], t))):
 			p.owner_clear = true
 
+		if p.shot == Weapons.SHOT_PAD:
+			_bounce(state, p, box, rules)
+			continue
+		if p.shot == Weapons.SHOT_MINE:
+			_trip_mine(state, i, box, rules)
+			continue
+
 		# A bat swing bats it back: it becomes the batter's, reversed and 1.25x faster.
 		for b in fighters.size():
 			var batter := fighters[b]
@@ -994,10 +1108,18 @@ static func _shot_hits(state: GameState, frozen: Array[bool], rules: MatchRules)
 			p.vel_x = absi(p.vel_x) * Weapons.SWEET_PERCENT / 100 * batter.facing
 			if p.shot == Weapons.SHOT_BULLET or p.shot == Weapons.SHOT_ARROW:
 				p.age = 0
+			if p.shot == Weapons.SHOT_BOOMERANG:
+				p.timer = 0 # it flies out again, and comes back to the batter
 			break
 
-		if p.shot == Weapons.SHOT_BOMB and p.timer <= 0:
+		if ((p.shot == Weapons.SHOT_BOMB or p.shot == Weapons.SHOT_HOLE) and p.timer <= 0) \
+				or (p.shot == Weapons.SHOT_MISSILE and p.age >= Weapons.MISSILE_FRAMES):
 			_explode(state, i, -1, rules)
+			continue
+		if p.shot == Weapons.SHOT_HOLE:
+			# It doesn't burst on touch: for the end of its fuse it pulls everyone near it in.
+			if p.timer <= Weapons.HOLE_PULL_FRAMES:
+				_pull(state, p, rules)
 			continue
 
 		for d in fighters.size():
@@ -1009,7 +1131,18 @@ static func _shot_hits(state: GameState, frozen: Array[bool], rules: MatchRules)
 			if not box.overlaps(hurtbox(def, t)):
 				continue
 
-			if p.shot == Weapons.SHOT_BOMB:
+			if p.shot == Weapons.SHOT_BOOMERANG and d == p.owner:
+				# Back to the hand: caught on the way back, empty-handed. Otherwise it flies past.
+				if p.timer == 0 or def.weapon != Weapons.NONE:
+					continue
+				def.weapon = p.weapon
+				def.weapon_supply = p.supply
+				def.uzi_shots = 0
+				def.uzi_streak = 0
+				def.uzi_target = 0
+				p.clear()
+				break
+			if p.shot == Weapons.SHOT_BOMB or p.shot == Weapons.SHOT_MISSILE:
 				if d == p.owner:
 					continue # it bursts on touching anyone but its thrower
 				_explode(state, i, d, rules)
@@ -1029,6 +1162,58 @@ static func _shot_hits(state: GameState, frozen: Array[bool], rules: MatchRules)
 				break
 
 
+## A trampoline bounces up everyone touching it who isn't already rising, its owner too once they
+## have stepped off it. It does no damage and credits nobody.
+static func _bounce(state: GameState, p: Prop, box: FxRect, rules: MatchRules) -> void:
+	var fighters := state.fighters
+	for d in fighters.size():
+		var f := fighters[d]
+		if not f.is_active() or is_intangible(f, rules.tuning) or f.action == A_HITSTUN:
+			continue
+		if d == p.owner and not p.owner_clear:
+			continue
+		if f.vel_y > 0 or not box.overlaps(hurtbox(f, rules.tuning)):
+			continue
+		f.vel_y = Weapons.PAD_LAUNCH
+		f.grounded = false
+
+
+## An armed mine bursts on the first fighter touching it, its planter included. One that nobody
+## found bursts by itself after 15 s.
+static func _trip_mine(state: GameState, index: int, box: FxRect, rules: MatchRules) -> void:
+	var p := state.props[index]
+	if p.age >= Weapons.MINE_FRAMES:
+		_explode(state, index, -1, rules)
+		return
+	if p.timer > 0:
+		return
+	var fighters := state.fighters
+	for d in fighters.size():
+		var f := fighters[d]
+		if not f.is_active() or is_intangible(f, rules.tuning):
+			continue
+		if d == p.owner and not p.owner_clear:
+			continue
+		if not box.overlaps(hurtbox(f, rules.tuning)):
+			continue
+		_explode(state, index, d, rules)
+		return
+
+
+## The black hole drags everyone within reach sideways towards it.
+static func _pull(state: GameState, p: Prop, rules: MatchRules) -> void:
+	var fighters := state.fighters
+	var cy := p.pos_y + Weapons.shot_half(Weapons.SHOT_HOLE)
+	for d in fighters.size():
+		var f := fighters[d]
+		if not f.is_active() or is_intangible(f, rules.tuning):
+			continue
+		var dx := p.pos_x - f.pos_x
+		if absi(dx) > Weapons.HOLE_REACH or absi(f.pos_y + rules.tuning.height / 2 - cy) > Weapons.HOLE_REACH:
+			continue
+		f.pos_x += clampi(dx, -Weapons.HOLE_PULL, Weapons.HOLE_PULL)
+
+
 ## A projectile hits a fighter, its owner included. Sweet spots (never on yourself): the ball's
 ## second and later fighters ("Strike!"), the Uzi from the 6th bullet in a row on one target, an
 ## arrow that flew far (a long shot), a thrown weapon on an airborne target.
@@ -1042,6 +1227,7 @@ static func _shot_hit(state: GameState, index: int, target: int, rules: MatchRul
 		Weapons.SHOT_ROLL: move = MoveData.Id.BALL_ROLL
 		Weapons.SHOT_BULLET: move = MoveData.Id.UZI_FIRE
 		Weapons.SHOT_ARROW: move = MoveData.Id.BOW_SHOT
+		Weapons.SHOT_BOOMERANG: move = MoveData.Id.BOOMERANG_THROW
 	var hit := Hit.new(rules.tuning.moves.get_move(move))
 	match p.shot:
 		Weapons.SHOT_ROLL:
@@ -1063,6 +1249,9 @@ static func _shot_hit(state: GameState, index: int, target: int, rules: MatchRul
 		Weapons.SHOT_ARROW:
 			if not is_self and p.age >= Weapons.LONG_SHOT_FRAMES:
 				hit.sweeten()
+		Weapons.SHOT_BOOMERANG:
+			if not is_self and p.timer != 0:
+				hit.sweeten() # caught by it on its way back
 		Weapons.SHOT_THROWN:
 			hit.damage = Weapons.throw_damage(p.weapon)
 			if not is_self and not fighters[target].grounded:
@@ -1074,18 +1263,26 @@ static func _shot_hit(state: GameState, index: int, target: int, rules: MatchRul
 	_land_hit(state, owner, target, hit, side, false, rules)
 
 
-## A cherry bomb bursts: a 2.4 m box that hits everyone in it, its thrower too, launching them away
-## from its centre. A fighter it burst on is a direct hit (a sweet spot).
+## A cherry bomb, mine, missile or black hole bursts: a 2.4 m box (the hole's is 3.6 m) that hits
+## everyone in it, its thrower too, launching them away from its centre. A fighter it burst on is a
+## direct hit (a sweet spot).
 static func _explode(state: GameState, index: int, direct: int, rules: MatchRules) -> void:
 	var p := state.props[index]
 	var px := p.pos_x
 	var py := p.pos_y
 	var weapon := p.weapon
 	var owner := p.owner
+	var shot := p.shot
 	p.clear()
 	var fighters := state.fighters
-	var cy := py + Weapons.shot_half(Weapons.SHOT_BOMB)
-	var blast := FxRect.new(px - Weapons.BLAST_HALF, cy - Weapons.BLAST_HALF, px + Weapons.BLAST_HALF, cy + Weapons.BLAST_HALF)
+	var cy := py + Weapons.shot_half(shot)
+	var half := Weapons.HOLE_BLAST_HALF if shot == Weapons.SHOT_HOLE else Weapons.BLAST_HALF
+	var burst: int = MoveData.Id.BOMB_LOB
+	match shot:
+		Weapons.SHOT_MINE: burst = MoveData.Id.MINE_PLANT
+		Weapons.SHOT_MISSILE: burst = MoveData.Id.MISSILE_FIRE
+		Weapons.SHOT_HOLE: burst = MoveData.Id.HOLE_LOB
+	var blast := FxRect.new(px - half, cy - half, px + half, cy + half)
 	for d in fighters.size():
 		var def := fighters[d]
 		if not def.is_active() or is_intangible(def, rules.tuning):
@@ -1093,7 +1290,7 @@ static func _explode(state: GameState, index: int, direct: int, rules: MatchRule
 		if not blast.overlaps(hurtbox(def, rules.tuning)):
 			continue
 		var from := owner if owner >= 0 else d
-		var hit := Hit.new(Weapons.move_for(MoveData.Id.BOMB_LOB))
+		var hit := Hit.new(Weapons.move_for(burst))
 		if d == direct and from != d:
 			hit.sweeten()
 		if rules.signature_of(from) == weapon:

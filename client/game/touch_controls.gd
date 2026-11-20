@@ -53,7 +53,8 @@ const RING := Color(1, 1, 1, 0.42)
 const LABEL := Color(1, 1, 1, 0.8)
 
 ## What the big attack button says while a weapon is in hand, by the sim's weapon id.
-const WEAPON_VERBS := ["Kick", "Bonk", "Swing", "Roll", "Blast", "Fire", "Lob", "Shoot"]
+const WEAPON_VERBS := ["Kick", "Bonk", "Swing", "Roll", "Blast", "Fire", "Lob", "Shoot",
+	"Throw", "Place", "Plant", "Launch", "Lob"]
 const ARMED_RING := Color(1, 0.82, 0.25, 0.9)
 
 ## The local fighter's weapon (Weapons id, 0 for none), set by the scene: the attack button shows

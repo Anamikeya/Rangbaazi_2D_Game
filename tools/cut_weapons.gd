@@ -7,7 +7,8 @@ extends SceneTree
 ## sheets, using v3's weapon-atlas.json rectangles.
 
 # Game weapon id (Weapons in client/sim) -> the art pack's weapon key.
-const KEYS := {1: "w011", 2: "w031", 3: "w006", 4: "w061", 5: "w005", 6: "w008", 7: "w054"}
+const KEYS := {1: "w011", 2: "w031", 3: "w006", 4: "w061", 5: "w005", 6: "w008", 7: "w054",
+	8: "w055", 9: "w007", 10: "w070", 11: "w068", 12: "w098"}
 
 
 func _init() -> void:

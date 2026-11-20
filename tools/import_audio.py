@@ -39,6 +39,11 @@ SFX = {
     "weapon_5.wav": ("round-brawler-v3", "audio/weapons/w005-primary.wav"),  # uzi
     "weapon_6.wav": ("round-brawler-v3", "audio/weapons/w008-primary.wav"),  # cherry bombs
     "weapon_7.wav": ("round-brawler-v3", "audio/weapons/w054-primary.wav"),  # bow
+    "weapon_8.wav": ("round-brawler-v3", "audio/weapons/w055-primary.wav"),  # boomerang
+    "weapon_9.wav": ("round-brawler-v3", "audio/weapons/w007-primary.wav"),  # trampoline
+    "weapon_10.wav": ("round-brawler-v3", "audio/weapons/w070-primary.wav"),  # mines
+    "weapon_11.wav": ("round-brawler-v3", "audio/weapons/w068-primary.wav"),  # homing missile
+    "weapon_12.wav": ("round-brawler-v3", "audio/weapons/w098-primary.wav"),  # black-hole bomb
     "boom.wav": ("round-brawler-v3", "audio/weapons/w008-secondary.wav"),
 }
 

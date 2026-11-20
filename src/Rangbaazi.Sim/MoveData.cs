@@ -37,6 +37,13 @@ public enum MoveId : byte
 
     /// <summary>Throwing the held weapon (Drop weapon, or an attack button with it empty). Once.</summary>
     WeaponThrow,
+
+    // More weapon attacks, after the throw so the older ids keep their numbers.
+    BoomerangThrow,
+    PadPlace,
+    MinePlant,
+    MissileFire,
+    HoleLob,
 }
 
 /// <summary>

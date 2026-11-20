@@ -255,11 +255,16 @@ public static class SparringBot
         WeaponId.BowlingBall => Fix.FromInt(12),
         WeaponId.CherryBombs => Fix.FromInt(6),
         WeaponId.Bow => Fix.FromInt(15),
+        WeaponId.Boomerang => Fix.FromInt(8),
+        WeaponId.HomingMissile => Fix.FromInt(14),
+        WeaponId.BlackHoleBomb => Fix.FromInt(6),
         _ => Fix.Zero,
     };
 
     /// <summary>Closer than this, lobbing a bomb would land it behind them (or on the bot).</summary>
-    private static Fix RangedMin(WeaponId w) => w == WeaponId.CherryBombs ? Fix.FromRatio(5, 2) : Fix.Zero;
+    private static Fix RangedMin(WeaponId w) =>
+        w == WeaponId.HomingMissile ? Fix.FromInt(3) // any closer and its burst catches the shooter
+        : w == WeaponId.CherryBombs || w == WeaponId.BlackHoleBomb ? Fix.FromRatio(5, 2) : Fix.Zero;
 
     /// <summary>The nearest box or loose weapon resting on this platform within 5 m, or -1.</summary>
     private static int NearestItem(GameState state, in Fighter me, int self, FixRect floor)

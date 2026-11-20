@@ -15,9 +15,10 @@ const INPUT := 1
 const STATE := 2
 const HEADER_BYTES := 12
 const FIGHTER_BYTES := 31
-const PROP_BYTES := 12
-## The arena protocol version sent as v= (ArenaLimits.ProtocolVersion): 2 added weapons, 3 the last hit and main weapon.
-const PROTOCOL_VERSION := 3
+const PROP_BYTES := 13
+## The arena protocol version sent as v= (ArenaLimits.ProtocolVersion): 2 added weapons, 3 the last hit and main weapon,
+## 4 five more weapons and each prop's timer.
+const PROTOCOL_VERSION := 4
 ## Frames the jitter buffer tries to keep ready; past MAX_BUFFER it skips ahead to catch up.
 const TARGET_BUFFER := 3
 const MAX_BUFFER := 10
@@ -372,6 +373,7 @@ func _apply(p: PackedByteArray) -> void:
 		prop.pos_x = p.decode_s32(at + 3)
 		prop.pos_y = p.decode_s32(at + 7)
 		prop.vel_x = p.decode_s8(at + 11)
+		prop.timer = p[at + 12]
 		at += PROP_BYTES
 
 

@@ -12,9 +12,13 @@ namespace Rangbaazi.Sim.Tests;
 /// </summary>
 public class GoldenTraceTests
 {
-    /// <summary>A scripted match. <c>TimeLimit</c> &gt; 0 plays it under room rules on Rooftops (timed, rage, second wind).</summary>
+    /// <summary>
+    /// A scripted match. <c>TimeLimit</c> &gt; 0 plays it under room rules on Rooftops (timed, rage, second wind).
+    /// <c>ArmNewer</c> hands every fighter one of the five newer weapons every 90 frames (the
+    /// boomerang on), so each of them is in the trace whatever the boxes hold.
+    /// </summary>
     private sealed record Scenario(string Name, int Players, ulong Seed, int Frames, bool Guts, CpuLevel[]? Bots, ulong InputSeed, int TimeLimit = 0,
-        bool Weapons = false, WeaponId[]? Signatures = null);
+        bool Weapons = false, WeaponId[]? Signatures = null, bool ArmNewer = false);
 
     private static readonly WeaponId[] SomeSignatures =
     {
@@ -34,6 +38,9 @@ public class GoldenTraceTests
         new("weapons_random_4p", 4, 31, 2400, true, null, 23, Weapons: true, Signatures: SomeSignatures),
         new("weapons_bots_4p", 4, 8, 3600, true, new[] { CpuLevel.Hard, CpuLevel.Normal, CpuLevel.Hard, CpuLevel.Easy }, 0,
             Weapons: true, Signatures: SomeSignatures),
+        new("newer_weapons_random_4p", 4, 13, 2400, true, null, 29, Weapons: true, Signatures: SomeSignatures, ArmNewer: true),
+        new("newer_weapons_bots_4p", 4, 17, 3600, true, new[] { CpuLevel.Hard, CpuLevel.Normal, CpuLevel.Hard, CpuLevel.Easy }, 0,
+            Weapons: true, Signatures: SomeSignatures, ArmNewer: true),
     };
 
     /// <summary>The rules a scenario plays under; room scenarios copy <see cref="MatchRules.Room"/> with a short clock.</summary>
@@ -69,11 +76,20 @@ public class GoldenTraceTests
         json.Append($"  \"hazards\": {(rules.Hazards ? "true" : "false")},\n");
         json.Append($"  \"flurry\": {(rules.Flurry ? "true" : "false")},\n");
         json.Append($"  \"signatures\": [{string.Join(", ", (rules.Signatures ?? Array.Empty<WeaponId>()).Select(w => ((int)w).ToString()))}],\n");
+        json.Append($"  \"arm_newer\": {(s.ArmNewer ? "true" : "false")},\n");
         json.Append(s.Bots == null ? "  \"bots\": null,\n" : $"  \"bots\": [{string.Join(", ", s.Bots.Select(b => $"\"{b.ToString().ToLowerInvariant()}\""))}],\n");
         json.Append($"  \"initial\": \"{state.Checksum():X16}\",\n");
         json.Append("  \"steps\": [\n");
         for (int f = 0; f < s.Frames; f++)
         {
+            if (s.ArmNewer && f % 90 == 0)
+                for (int p = 0; p < s.Players; p++)
+                {
+                    if (!state.Fighters[p].IsActive) continue;
+                    var w = (WeaponId)((int)WeaponId.Boomerang + (f / 90 + p) % 5);
+                    state.Fighters[p].Weapon = w;
+                    state.Fighters[p].WeaponSupply = Weapons.Get(w).Supply;
+                }
             for (int p = 0; p < s.Players; p++)
             {
                 inputs[p] = s.Bots != null

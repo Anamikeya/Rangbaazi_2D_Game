@@ -138,6 +138,8 @@ var _fx: Array = []
 # Per fighter, what the last frame showed: [josh, grounded, falls, active, x, y, action, weapon, kos].
 var _seen: Array = []
 var _seen_frame := -2
+# Where the shots that burst (bombs, mines, missiles, black holes) were last frame: [x, y, big].
+var _bursting: Array = []
 # The KO feed: [{text, color, age}], newest last.
 var _feed: Array = []
 var _bar_bottom := 0.0 # the y under the stats bar; the arena is drawn below it
@@ -481,7 +483,7 @@ func _text(font: Font, text: String, centre_x: float, baseline_y: float, font_si
 
 
 ## How long each weapon is drawn, in metres, by the sim's weapon id.
-const WEAPON_LENGTH := [0.0, 0.95, 1.3, 0.6, 1.15, 0.75, 0.55, 0.95]
+const WEAPON_LENGTH := [0.0, 0.95, 1.3, 0.6, 1.15, 0.75, 0.55, 0.95, 0.85, 1.0, 0.6, 1.25, 0.65]
 ## How long the weapon on a crate is drawn, in metres (three times the 0.55 it started at).
 const CRATE_WEAPON := 1.65
 const CRATE := Color("a0672c")
@@ -583,6 +585,51 @@ func _draw_props(shots: bool) -> void:
 						_draw_weapon_sprite(Weapons.CHERRY_BOMBS, centre, 0.45, 0.0, 1)
 						if int(tick) % 6 < 3:
 							draw_circle(centre + Vector2(0, -_ppm * 0.3), _ppm * 0.08, Color("ffb020"))
+					Weapons.SHOT_PAD:
+						# The trampoline lies flat on the ground, as wide as its box.
+						var bed := ArtLibrary.weapon_texture(Weapons.TRAMPOLINE)
+						var squash := 1.0 + 0.06 * sin(tick * 0.3)
+						if bed == null:
+							draw_rect(Rect2(r.position.x, r.end.y - _ppm * 0.25, r.size.x, _ppm * 0.25), Color("3aa0e8"))
+						else:
+							var w := r.size.x * 1.25
+							var h := w * bed.get_height() / maxf(1.0, bed.get_width()) * squash
+							draw_texture_rect(bed, Rect2(Vector2(centre.x - w / 2.0, r.end.y - h), Vector2(w, h)), false)
+					Weapons.SHOT_MINE:
+						_draw_weapon_sprite(Weapons.MINES, Vector2(centre.x, r.end.y - _ppm * 0.18), 0.6, 0.0, 1)
+						# Dim while it arms, then a blinking red light.
+						var armed := p.timer <= 0
+						if not armed or int(tick) % 20 < 10:
+							draw_circle(Vector2(centre.x, r.end.y - _ppm * 0.42), _ppm * 0.07, Color("ff3b30") if armed else Color("7a6a60"))
+					Weapons.SHOT_MISSILE:
+						var heading := Vector2(float(p.vel_x), -float(p.vel_y))
+						var turn := heading.angle() if heading.length_squared() > 0.0 else 0.0
+						for k in 3: # its smoke
+							draw_circle(centre - Vector2.from_angle(turn) * _ppm * (0.45 + 0.22 * k), _ppm * (0.12 - 0.025 * k), Color(0.9, 0.9, 0.9, 0.5 - 0.13 * k))
+						draw_set_transform(centre, turn, Vector2.ONE)
+						var rocket := ArtLibrary.weapon_texture(Weapons.HOMING_MISSILE)
+						if rocket == null:
+							draw_rect(Rect2(-_ppm * 0.35, -_ppm * 0.1, _ppm * 0.7, _ppm * 0.2), Color("d8d8e0"))
+						else:
+							var w := _ppm * 0.9
+							var h := w * rocket.get_height() / maxf(1.0, rocket.get_width())
+							# Flown the other way the sprite is flipped, so it is never upside down.
+							var flip := -1.0 if absf(turn) > PI / 2.0 else 1.0
+							draw_set_transform(centre, turn, Vector2(1.0, flip))
+							draw_texture_rect(rocket, Rect2(Vector2(-w / 2.0, -h / 2.0), Vector2(w, h)), false)
+						draw_set_transform_matrix(Transform2D.IDENTITY)
+					Weapons.SHOT_HOLE:
+						# A dark ball; once it starts pulling, rings close in on it from its reach.
+						var pulling := p.timer <= Weapons.HOLE_PULL_FRAMES
+						if pulling:
+							var reach := Fx.to_float(Weapons.HOLE_REACH) * _ppm
+							draw_circle(centre, reach, Color(0.45, 0.2, 0.75, 0.10))
+							for k in 3:
+								var t := fmod(tick / 26.0 + k / 3.0, 1.0)
+								draw_circle(centre, reach * (1.0 - t), Color(0.72, 0.45, 1.0, 0.55 * t), false, maxf(2.0, _ppm * 0.05), true)
+						var ball := _ppm * (0.32 + (0.12 if pulling else 0.0) + 0.03 * sin(tick * 0.4))
+						draw_circle(centre, ball * 1.25, Color(0.6, 0.3, 0.95, 0.55))
+						draw_circle(centre, ball, Color("14081f"))
 					_:
 						_draw_weapon_sprite(p.weapon, centre, WEAPON_LENGTH[p.weapon] * 0.9, tick * 0.45 * dir, 1)
 
@@ -856,6 +903,7 @@ func _watch_fx() -> void:
 			_fx.clear()
 			_feed.clear()
 		return
+	_watch_bursts()
 	for i in n:
 		var f := state.fighters[i]
 		var s: Array = _seen[i]
@@ -909,6 +957,27 @@ func _watch_fx() -> void:
 		s[7] = f.weapon
 		s[8] = f.kos
 		s[9] = f.hit_count
+
+
+## A bursting shot that was here last frame and is gone now has burst: a flash where it was.
+func _watch_bursts() -> void:
+	var now: Array = []
+	for p in state.props:
+		if p.kind == Weapons.PROP_SHOT and (p.shot == Weapons.SHOT_BOMB or p.shot == Weapons.SHOT_MINE
+				or p.shot == Weapons.SHOT_MISSILE or p.shot == Weapons.SHOT_HOLE):
+			now.append([Fx.to_float(p.pos_x), Fx.to_float(p.pos_y) + 0.25, p.shot == Weapons.SHOT_HOLE])
+	for was: Array in _bursting:
+		var still := false
+		for b: Array in now:
+			if absf(float(b[0]) - float(was[0])) < 1.0 and absf(float(b[1]) - float(was[1])) < 1.0:
+				still = true
+				break
+		if not still and absf(float(was[0])) < 17.0: # not one that flew out of the arena
+			var big := bool(was[2])
+			_fx.append({"kind": "blast", "x": was[0], "y": was[1], "age": 0, "life": 22, "size": 1.8 if big else 1.2,
+				"color": Color("b070ff") if big else Color("ffb020")})
+			_shake = maxf(_shake, 10.0 if big else 7.0)
+	_bursting = now
 
 
 func _character(i: int) -> String:
@@ -966,6 +1035,13 @@ func _draw_fx(font: Font) -> void:
 			"word":
 				var c: Color = fx["color"]
 				_text(font, str(fx["text"]), at.x, at.y - t * _ppm * 0.9, int(26 * float(fx["size"]) * (pop if float(fx["size"]) > 1.0 else 1.0)), Color(c, fade))
+			"blast":
+				# A burst as wide as its blast: a flash, a ring racing out, and rays.
+				var c: Color = fx["color"]
+				var reach := float(fx["size"]) * _ppm * (0.35 + 0.65 * minf(1.0, t * 2.5))
+				draw_circle(at, reach * (1.0 - 0.5 * t), Color(1.0, 0.95, 0.8, 0.75 * (1.0 - t)))
+				draw_circle(at, reach, Color(c, fade), false, maxf(4.0, _ppm * 0.12), true)
+				_draw_burst(at, reach * 1.15, 10, Color(c, fade), maxf(3.0, _ppm * 0.08))
 			"ring":
 				var c: Color = fx["color"]
 				draw_circle(at, (0.4 + 1.6 * t) * _ppm, Color(c, fade), false, maxf(3.0, _ppm * 0.08), true)
@@ -976,7 +1052,8 @@ func _draw_fx(font: Font) -> void:
 
 
 ## What a sweet-spot hit shouts, by the weapon it came from (the sim's weapon id).
-const SWEET_WORDS := ["", "BONK!", "SIX!", "STRIKE!", "POINT BLANK!", "ON TARGET!", "DIRECT HIT!", "LONG SHOT!"]
+const SWEET_WORDS := ["", "BONK!", "SIX!", "STRIKE!", "POINT BLANK!", "ON TARGET!", "DIRECT HIT!", "LONG SHOT!",
+	"COMEBACK!", "", "STEPPED ON IT!", "DIRECT HIT!", ""]
 
 
 ## The painted background ends at the arena's edges; past them the view shows the plain sky colour.

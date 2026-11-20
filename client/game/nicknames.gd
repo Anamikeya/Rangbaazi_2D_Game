@@ -15,6 +15,11 @@ const WEAPON_WORDS := [
 	["Uzi", "Trigger", "Bullet", "Rat-a-tat"],
 	["Pataka", "Cherry", "Fuse", "Firecracker"],
 	["Arrow", "Bullseye", "Longbow", "Quiver"],
+	["Boomerang", "Comeback", "Return", "Curve"],
+	["Trampoline", "Bounce", "Spring", "Jumper"],
+	["Mine", "Booby-Trap", "Tripwire", "Surprise"],
+	["Missile", "Rocket", "Lock-On", "Seeker"],
+	["Black-Hole", "Gravity", "Vortex", "Void"],
 ]
 const ALL_ROUNDER_WORDS := ["Gully", "Mohalla", "Jugaad", "Chaos"]
 const REGULAR_TITLES := ["Wala", "Champ", "Ace", "Bhai", "Kid", "Specialist"]
@@ -23,7 +28,7 @@ const ALL_ROUNDER := 15
 const MASTER := 128
 
 
-## A fighter's main weapon as one number, the way rooms send it: 0-7 (0 is fists), or
+## A fighter's main weapon as one number, the way rooms send it: 0-12 (0 is fists), or
 ## ALL_ROUNDER, plus MASTER for a master (Simulation.main_weapon).
 static func code_for(state: GameState, fighter: int) -> int:
 	var main := Simulation.main_weapon(state, fighter)

@@ -14,6 +14,11 @@ public enum WeaponId : byte
     Uzi,
     CherryBombs,
     Bow,
+    Boomerang,
+    Trampoline,
+    Mines,
+    HomingMissile,
+    BlackHoleBomb,
 }
 
 /// <summary>What a projectile prop is.</summary>
@@ -30,6 +35,16 @@ public enum ShotKind : byte
     Arrow,
     /// <summary>A thrown weapon: it hits once, or lands, and is gone.</summary>
     Thrown,
+    /// <summary>A boomerang: flies out, slows, and comes back to its thrower's hand, hitting on both legs.</summary>
+    Boomerang,
+    /// <summary>A trampoline lying on the stage: anyone touching it is bounced up. It never hits.</summary>
+    Pad,
+    /// <summary>A planted mine: armed after a moment, it bursts on anyone who touches it.</summary>
+    Mine,
+    /// <summary>A homing missile: slow, it steers at the nearest fighter who isn't its owner, and bursts.</summary>
+    Missile,
+    /// <summary>A black-hole bomb: it lands, pulls everyone near it in, then bursts.</summary>
+    Hole,
 }
 
 public enum PropKind : byte
@@ -60,7 +75,7 @@ public struct Prop
     public FixVec2 Position;
     public FixVec2 Velocity;
     public bool Grounded;
-    public int Timer;           // frames: age of a box or item, fuse of a bomb, wait of a pending box
+    public int Timer;           // frames: age of a box or item, fuse of a bomb, mine or pad, wait of a pending box; a boomerang's leg (0 out, 1 back)
     public int Age;             // frames in flight
     public int HitMask;         // one bit per fighter already hit
     public int Hits;            // fighters hit by this shot so far
@@ -113,7 +128,7 @@ public sealed class WeaponData
 /// </summary>
 public static class Weapons
 {
-    public const int Count = 8; // None plus seven weapons
+    public const int Count = 13; // None plus twelve weapons
     public const int MaxProps = 16;
 
     // Prop Boxes: fast, because the game is fast.
@@ -159,6 +174,33 @@ public static class Weapons
     public const int ShotgunFarDamage = 10;
     public const int UziStreakSweet = 6;
 
+    // The boomerang: 10 m out in 40 frames, then back to the hand.
+    public static readonly Fix BoomerangSpeed = Fix.FromRatio(50, 100);
+    public static readonly Fix BoomerangDrag = Fix.FromRatio(125, 10000);
+    public static readonly Fix BoomerangClimb = Fix.FromRatio(12, 100);  // how fast it rises or sinks to the hand
+    public const int BoomerangFrames = 150;                              // uncaught by then, it drops and lies there
+
+    // The trampoline: lies for 10 s and bounces anyone on it 0.42 m/frame up.
+    public const int PadFrames = 600;
+    public static readonly Fix PadLaunch = Fix.FromRatio(42, 100);
+
+    // Mines: armed 0.75 s after planting; one nobody found bursts by itself after 15 s.
+    public const int MineArmFrames = 45;
+    public const int MineFrames = 900;
+
+    // The homing missile: slow, turning a little each frame, bursting after 4 s.
+    public static readonly Fix MissileSpeed = Fix.FromRatio(20, 100);
+    public static readonly Fix MissileTurn = Fix.FromRatio(8, 1000);
+    public static readonly Fix MissileLevel = Fix.FromRatio(1, 5);       // within this height of its target it flies level
+    public const int MissileFrames = 240;
+
+    // The black-hole bomb: a 110-frame fuse; for the last 80 it pulls everyone within 4.5 m.
+    public const int HoleFuse = 110;
+    public const int HolePullFrames = 80;
+    public static readonly Fix HoleReach = Fix.FromRatio(9, 2);
+    public static readonly Fix HolePull = Fix.FromRatio(11, 100);       // a little under run speed: running away just gets you out
+    public static readonly Fix HoleBlastHalf = Fix.FromRatio(21, 10);    // a 4.2 m burst
+
     /// <summary>The Uzi's fixed spread pattern (vertical speed per shot): 0, +3, -3, +6, -6 degrees.</summary>
     private static readonly Fix[] UziSpread =
     {
@@ -174,6 +216,10 @@ public static class Weapons
         ShotKind.Bullet => Fix.FromRatio(3, 20),
         ShotKind.Bomb => Fix.FromRatio(1, 5),
         ShotKind.Arrow => Fix.FromRatio(1, 4),
+        ShotKind.Pad => Fix.FromRatio(9, 20),
+        ShotKind.Mine => Fix.FromRatio(1, 4),
+        ShotKind.Missile => Fix.FromRatio(1, 4),
+        ShotKind.Hole => Fix.FromRatio(1, 4),
         _ => Fix.FromRatio(3, 10),
     };
 
@@ -187,6 +233,11 @@ public static class Weapons
         new() { Id = WeaponId.Uzi, Move = MoveId.UziFire, Supply = 30, Fires = ShotKind.Bullet, ThrowDamage = 6 },
         new() { Id = WeaponId.CherryBombs, Move = MoveId.BombLob, Supply = 3, Fires = ShotKind.Bomb, ThrowDamage = 9 },
         new() { Id = WeaponId.Bow, Move = MoveId.BowShot, Supply = 6, Fires = ShotKind.Arrow, ThrowDamage = 6 },
+        new() { Id = WeaponId.Boomerang, Move = MoveId.BoomerangThrow, Supply = 4, Fires = ShotKind.Boomerang, ThrowDamage = 6 },
+        new() { Id = WeaponId.Trampoline, Move = MoveId.PadPlace, Supply = 3, Fires = ShotKind.Pad, ThrowDamage = 9 },
+        new() { Id = WeaponId.Mines, Move = MoveId.MinePlant, Supply = 3, Fires = ShotKind.Mine, ThrowDamage = 6 },
+        new() { Id = WeaponId.HomingMissile, Move = MoveId.MissileFire, Supply = 2, Fires = ShotKind.Missile, ThrowDamage = 12 },
+        new() { Id = WeaponId.BlackHoleBomb, Move = MoveId.HoleLob, Supply = 2, Fires = ShotKind.Hole, ThrowDamage = 9 },
     };
 
     public static WeaponData Get(WeaponId id) => Catalogue[(int)id];
@@ -281,6 +332,45 @@ public static class Weapons
         HitstunBonus = 4,
     };
 
+    public static readonly MoveData BoomerangThrow = new()
+    {
+        Startup = 8, Active = 0, Recovery = 12,
+        Damage = 8, BaseKnockback = Fix.FromRatio(14, 100), KnockbackGrowth = Fix.FromRatio(22, 10000),
+        LaunchX = C(8192), LaunchY = C(5736), // 35 degrees
+        HitstunBonus = 2,
+    };
+
+    /// <summary>Putting a trampoline down. It never hits anyone.</summary>
+    public static readonly MoveData PadPlace = new()
+    {
+        Startup = 6, Active = 0, Recovery = 10,
+        LaunchX = C(8192), LaunchY = C(5736),
+    };
+
+    public static readonly MoveData MinePlant = new()
+    {
+        Startup = 6, Active = 0, Recovery = 8,
+        Damage = 16, BaseKnockback = Fix.FromRatio(20, 100), KnockbackGrowth = Fix.FromRatio(26, 10000),
+        LaunchX = C(5000), LaunchY = C(8660), // 60 degrees, away from the blast
+        HitstunBonus = 4,
+    };
+
+    public static readonly MoveData MissileFire = new()
+    {
+        Startup = 14, Active = 0, Recovery = 22,
+        Damage = 15, BaseKnockback = Fix.FromRatio(19, 100), KnockbackGrowth = Fix.FromRatio(27, 10000),
+        LaunchX = C(5000), LaunchY = C(8660), // 60 degrees, away from the blast
+        HitstunBonus = 4,
+    };
+
+    public static readonly MoveData HoleLob = new()
+    {
+        Startup = 10, Active = 0, Recovery = 16,
+        Damage = 20, BaseKnockback = Fix.FromRatio(25, 100), KnockbackGrowth = Fix.FromRatio(30, 10000),
+        LaunchX = C(3420), LaunchY = C(9397), // 70 degrees: thrown up out of the hole
+        HitstunBonus = 4,
+    };
+
     /// <summary>The bat's sweet spot (the tip) launches flat at 20 degrees: the ring-out "six".</summary>
     public static readonly Fix SixLaunchX = C(9397);
     public static readonly Fix SixLaunchY = C(3420);
@@ -295,6 +385,11 @@ public static class Weapons
         MoveId.BombLob => BombLob,
         MoveId.BowShot => BowShot,
         MoveId.WeaponThrow => WeaponThrow,
+        MoveId.BoomerangThrow => BoomerangThrow,
+        MoveId.PadPlace => PadPlace,
+        MoveId.MinePlant => MinePlant,
+        MoveId.MissileFire => MissileFire,
+        MoveId.HoleLob => HoleLob,
         _ => null,
     };
 

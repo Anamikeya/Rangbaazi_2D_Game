@@ -11,10 +11,16 @@ const SHOTGUN := 4
 const UZI := 5
 const CHERRY_BOMBS := 6
 const BOW := 7
-const COUNT := 8 # NONE plus seven weapons
+const BOOMERANG := 8
+const TRAMPOLINE := 9
+const MINES := 10
+const HOMING_MISSILE := 11
+const BLACK_HOLE_BOMB := 12
+const COUNT := 13 # NONE plus twelve weapons
 
 ## Names for drawing and the HUD (presentation only).
-const NAMES := ["", "Belan", "Baseball Bat", "Bowling Ball", "Shotgun", "Uzi", "Cherry Bombs", "Bow"]
+const NAMES := ["", "Belan", "Baseball Bat", "Bowling Ball", "Shotgun", "Uzi", "Cherry Bombs", "Bow",
+	"Boomerang", "Trampoline", "Mines", "Homing Missile", "Black-Hole Bomb"]
 
 # ShotKind
 const SHOT_NONE := 0
@@ -23,6 +29,11 @@ const SHOT_BULLET := 2 # an Uzi bullet: straight, fast, through platforms, gone 
 const SHOT_BOMB := 3   # a lobbed cherry bomb with a fuse
 const SHOT_ARROW := 4  # a bow's arrow: fast, dips a little, pierces everyone it hits
 const SHOT_THROWN := 5 # a thrown weapon: hits once, or lands, and is gone
+const SHOT_BOOMERANG := 6 # flies out, slows, and comes back to its thrower's hand, hitting on both legs
+const SHOT_PAD := 7     # a trampoline lying on the stage: anyone touching it is bounced up
+const SHOT_MINE := 8    # a planted mine: armed after a moment, it bursts on anyone who touches it
+const SHOT_MISSILE := 9 # slow, it steers at the nearest fighter who isn't its owner, and bursts
+const SHOT_HOLE := 10   # a black-hole bomb: it lands, pulls everyone near it in, then bursts
 
 # PropKind
 const PROP_NONE := 0
@@ -55,6 +66,14 @@ const LONG_SHOT_FRAMES := 20
 const SHOTGUN_FAR_DAMAGE := 10
 const UZI_STREAK_SWEET := 6
 
+const BOOMERANG_FRAMES := 150 # uncaught by then, it drops and lies there
+const PAD_FRAMES := 600       # a trampoline lies for 10 s
+const MINE_ARM_FRAMES := 45   # armed 0.75 s after planting
+const MINE_FRAMES := 900      # one nobody found bursts by itself after 15 s
+const MISSILE_FRAMES := 240   # it bursts after 4 s
+const HOLE_FUSE := 110
+const HOLE_PULL_FRAMES := 80  # for the end of its fuse it pulls everyone within reach
+
 static var BOX_HALF := Fx.ratio(2, 5)
 static var BOX_DROP_HEIGHT := Fx.from_int(6)
 static var EDGE_MARGIN := Fx.HALF
@@ -76,6 +95,16 @@ static var POINT_BLANK := Fx.ratio(6, 5)
 static var BAT_TIP := Fx.ratio(13, 10)
 static var SIX_LAUNCH_X := Fx.ratio(9397, 10000)
 static var SIX_LAUNCH_Y := Fx.ratio(3420, 10000)
+static var BOOMERANG_SPEED := Fx.ratio(50, 100)
+static var BOOMERANG_DRAG := Fx.ratio(125, 10000)
+static var BOOMERANG_CLIMB := Fx.ratio(12, 100)
+static var PAD_LAUNCH := Fx.ratio(42, 100)
+static var MISSILE_SPEED := Fx.ratio(20, 100)
+static var MISSILE_TURN := Fx.ratio(8, 1000)
+static var MISSILE_LEVEL := Fx.ratio(1, 5)
+static var HOLE_REACH := Fx.ratio(9, 2)
+static var HOLE_PULL := Fx.ratio(11, 100) # a little under run speed: running away just gets you out
+static var HOLE_BLAST_HALF := Fx.ratio(21, 10)
 static var UZI_SPREAD: PackedInt64Array = [0, Fx.ratio(366, 10000), Fx.ratio(-366, 10000), Fx.ratio(732, 10000), Fx.ratio(-732, 10000)]
 
 # Catalogue: [move id, supply, fires (shot kind), throw damage], by weapon id.
@@ -88,6 +117,11 @@ const _CATALOGUE := [
 	[MoveData.Id.UZI_FIRE, 30, SHOT_BULLET, 6],
 	[MoveData.Id.BOMB_LOB, 3, SHOT_BOMB, 9],
 	[MoveData.Id.BOW_SHOT, 6, SHOT_ARROW, 6],
+	[MoveData.Id.BOOMERANG_THROW, 4, SHOT_BOOMERANG, 6],
+	[MoveData.Id.PAD_PLACE, 3, SHOT_PAD, 9],
+	[MoveData.Id.MINE_PLANT, 3, SHOT_MINE, 6],
+	[MoveData.Id.MISSILE_FIRE, 2, SHOT_MISSILE, 12],
+	[MoveData.Id.HOLE_LOB, 2, SHOT_HOLE, 9],
 ]
 
 ## Each weapon's owner: the fighter who uses it best (+10% damage). The rest of the cast get
@@ -141,6 +175,10 @@ static func shot_half(s: int) -> int:
 		SHOT_BULLET: return Fx.ratio(3, 20)
 		SHOT_BOMB: return Fx.ratio(1, 5)
 		SHOT_ARROW: return Fx.ratio(1, 4)
+		SHOT_PAD: return Fx.ratio(9, 20)
+		SHOT_MINE: return Fx.ratio(1, 4)
+		SHOT_MISSILE: return Fx.ratio(1, 4)
+		SHOT_HOLE: return Fx.ratio(1, 4)
 	return Fx.ratio(3, 10)
 
 
@@ -208,6 +246,34 @@ static func move_for(id: int) -> MoveData:
 			startup = 6, active = 0, recovery = 12,
 			damage = 9, base_knockback = Fx.ratio(16, 100), knockback_growth = Fx.ratio(26, 10000),
 			launch_x = _c(8192), launch_y = _c(5736), # 35 degrees
+			hitstun_bonus = 4,
+		})
+		_moves[MoveData.Id.BOOMERANG_THROW] = MoveData.make({
+			startup = 8, active = 0, recovery = 12,
+			damage = 8, base_knockback = Fx.ratio(14, 100), knockback_growth = Fx.ratio(22, 10000),
+			launch_x = _c(8192), launch_y = _c(5736), # 35 degrees
+			hitstun_bonus = 2,
+		})
+		_moves[MoveData.Id.PAD_PLACE] = MoveData.make({ # putting a trampoline down: it never hits
+			startup = 6, active = 0, recovery = 10,
+			launch_x = _c(8192), launch_y = _c(5736),
+		})
+		_moves[MoveData.Id.MINE_PLANT] = MoveData.make({
+			startup = 6, active = 0, recovery = 8,
+			damage = 16, base_knockback = Fx.ratio(20, 100), knockback_growth = Fx.ratio(26, 10000),
+			launch_x = _c(5000), launch_y = _c(8660), # 60 degrees, away from the blast
+			hitstun_bonus = 4,
+		})
+		_moves[MoveData.Id.MISSILE_FIRE] = MoveData.make({
+			startup = 14, active = 0, recovery = 22,
+			damage = 15, base_knockback = Fx.ratio(19, 100), knockback_growth = Fx.ratio(27, 10000),
+			launch_x = _c(5000), launch_y = _c(8660), # 60 degrees, away from the blast
+			hitstun_bonus = 4,
+		})
+		_moves[MoveData.Id.HOLE_LOB] = MoveData.make({
+			startup = 10, active = 0, recovery = 16,
+			damage = 20, base_knockback = Fx.ratio(25, 100), knockback_growth = Fx.ratio(30, 10000),
+			launch_x = _c(3420), launch_y = _c(9397), # 70 degrees: thrown up out of the hole
 			hitstun_bonus = 4,
 		})
 	return _moves.get(id, null)

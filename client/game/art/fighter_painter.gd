@@ -24,6 +24,9 @@ const WEAPON_CLIPS := {
 	MoveData.Id.SHOTGUN_BLAST: ["jab", 4], MoveData.Id.BALL_ROLL: ["down_heavy", 12],
 	MoveData.Id.UZI_FIRE: ["jab", 4], MoveData.Id.BOMB_LOB: ["neutral_heavy", 14],
 	MoveData.Id.BOW_SHOT: ["jab", 4], MoveData.Id.WEAPON_THROW: ["jab", 4],
+	MoveData.Id.BOOMERANG_THROW: ["side_heavy", 16], MoveData.Id.PAD_PLACE: ["down_heavy", 12],
+	MoveData.Id.MINE_PLANT: ["down_heavy", 12], MoveData.Id.MISSILE_FIRE: ["jab", 4],
+	MoveData.Id.HOLE_LOB: ["neutral_heavy", 14],
 }
 ## Standing still (and posing in the fighter picker), the pack holds the fists up at eye height,
 ## where beside a round head they read as eyebrows. In these clips a fist stays at least

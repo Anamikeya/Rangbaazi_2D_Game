@@ -112,6 +112,44 @@ The pack's 48 hazard types are grouped into three behaviours (`tools/gen_arena_s
 
 **Screen-edge ring-outs** (asked for "like Chaos Faction"). The camera never shows past the 32 m of painted arena: its widest view is exactly the arena's width, so the screen is always full of arena, and it pans up and down to keep fighters in view. The side blast zones moved in from 26 m to **17.2 m**: a fighter is out once their body (0.8 m wide) has gone off the side of the screen by its own width. Top and bottom are unchanged. In a four-bot test this means a KO about every 5 s, at 23–81% Josh. `Simulation.SIM_VERSION` is 6.
 
+## Added 2026-11-20: five weapons with new behaviours
+
+The user asked for more of the art pack's 100 weapons, and only ones that do something the first seven don't. These five are in crates with the same odds as the rest. None has an owner yet. Every number is a first guess.
+
+| Weapon (pack key) | What it does | Supply | Sweet spot |
+|---|---|---|---|
+| Boomerang (w055) | Flies 10 m out in 40 frames, stops, and flies back to its thrower's hand. It passes through everyone and can hit each fighter once on each leg. 8 damage | 4 throws | "Comeback!": a hit on the way back |
+| Trampoline (w007) | Put down at the feet, it lies for 10 s and bounces up (0.42 m/frame) anyone touching it who isn't already rising. No damage | 3 pads | none |
+| Mines (w070) | Planted at the feet. Armed after 0.75 s, a mine bursts on the first fighter to touch it, its planter included. One nobody finds bursts by itself after 15 s. 16 damage, 2.4 m blast. Planting is quick: 6 startup, 8 recovery | 3 mines | "Stepped on it!": the fighter who set it off |
+| Homing Missile (w068) | Flies at 0.2 m/frame and turns a little each frame (0.008 m/frame²) towards the nearest fighter who isn't its owner. It passes through platforms, bursts on touching anyone but its owner, and bursts by itself after 4 s. 15 damage, 2.4 m blast | 2 missiles | A direct hit |
+| Black-Hole Bomb (w098) | Lobbed like a cherry bomb, with a 110-frame fuse. It does not burst on touch. For the last 80 frames it drags everyone within 4.5 m sideways towards it at 0.11 m/frame (just under run speed, so running away gets you out), its thrower too; then it bursts: 20 damage, 4.2 m blast, launched at 70° | 2 bombs | none |
+
+- **The boomerang in the hand.** Throwing it empties the hand; the boomerang carries the throws it has left. Its thrower catches it on the way back if their hands are empty. If it is not caught within 2.5 s, or its thrower is knocked out, it drops and lies there for anyone, with the throws it has left. After the last throw it comes back empty, and the next attack throws it away for good.
+- **The owner's grace.** A trampoline doesn't bounce, and a mine doesn't burst on, the fighter who put it down until they have stepped off it once.
+- **The bat.** A batted boomerang becomes the batter's and comes back to them. A batted missile chases everyone but the batter. Trampolines and mines can't be batted or parried.
+- **Bursts.** A mine, a missile and a black hole burst the way a cherry bomb does: everyone in the box is hit, the owner included, and launched away from its centre.
+- **The CPU** fires the boomerang from up to 8 m, the missile from 3–14 m and the black hole from 2.5–6 m. It uses trampolines and mines at fist range.
+- **No new state.** The five use the fields a prop already had (`Timer` is a mine's arming time, a pad's life, a hole's fuse and a boomerang's leg), so nothing was added to the checksum.
+- **Rooms.** Each prop in a STATE frame is now 13 bytes: the new last byte is its timer (capped at 255), so every screen can show a mine arming and a black hole starting to pull. The arena protocol is version 4.
+- **Versions:** `Simulation.SIM_VERSION` is 7. Two new golden traces (`newer_weapons_random_4p`, `newer_weapons_bots_4p`) hand every fighter one of the five every 90 frames, so each is checked against the C# reference.
+- **Look and sound.** Sprites are cut from the pack by `tools/cut_weapons.gd` (ids 8–12) and sounds by `tools/import_audio.py`. A burst draws a flash and a ring as wide as its blast.
+
+### Tuned 2026-11-21
+
+Measured, not played: four Hard CPUs for a minute on Rooftops and the graybox, six matches each, with one of them kept armed with a single weapon. The measure is the damage one crate's worth of a weapon does. The older weapons land between about 20 (Belan, bat) and 75 (bow), with the shotgun and cherry bombs near 40.
+
+| Weapon | Before | Change | After |
+|---|---|---|---|
+| Boomerang | 62 per crate, 5.8 KOs a minute | 9 → 8 damage | 55, 4.2 KOs |
+| Mines | 28 per crate, and the planter fell most of all | 14 → 16 damage, base knockback 0.19 → 0.20, planting 8/12 → 6/8 frames | 38 |
+| Homing Missile | 37 per crate, but 10 hits a minute on its own shooter | The CPU no longer fires it from under 3 m. The missile is unchanged | 4 hits a minute on the shooter |
+| Black-Hole Bomb | 15 per crate | 16 → 20 damage, base knockback 0.22 → 0.25, growth 0.0028 → 0.0030, pull 0.08 → 0.11 m/frame, blast 3.6 → 4.2 m, 1 → 2 bombs | 28 |
+| Trampoline | no damage, by design | unchanged | |
+
+- A wider pull (5.5 m) was tried for the black hole and dropped: it caught the thrower more than anyone else.
+- The CPU still walks back onto its own mines.
+- The same measure shows the bow and the bowling ball well ahead of the other older weapons in the CPU's hands. They were not changed here.
+
 ## Not built yet
 
 These come from v0.2 and the GDD:
@@ -119,5 +157,5 @@ These come from v0.2 and the GDD:
 - weapon swing animations from the art pack (the game borrows a fist move's poses for now);
 - hit reactions drawn on the fighter (dizzy stars, soot);
 - hazards that slip, slow or break (they push or hit for now);
-- the other 93 weapons;
+- the other 88 weapons;
 - match settings to turn weapons or hazards off.

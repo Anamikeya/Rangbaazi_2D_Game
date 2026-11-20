@@ -33,8 +33,15 @@ func _replay(file_name: String) -> void:
 	var inputs := PackedInt32Array()
 	inputs.resize(players)
 	var steps: Array = g["steps"]
+	var arm_newer := bool(g.get("arm_newer", false))
 	for f in steps.size():
 		var step: Array = steps[f]
+		if arm_newer and f % 90 == 0: # every fighter is handed one of the five newer weapons
+			for p in players:
+				if state.fighters[p].is_active():
+					var w := Weapons.BOOMERANG + (f / 90 + p) % 5
+					state.fighters[p].weapon = w
+					state.fighters[p].weapon_supply = Weapons.supply_of(w)
 		var expected_inputs: Array = step[0]
 		for p in players:
 			if bots != null:
@@ -90,6 +97,14 @@ func test_weapons_random_inputs_four_players() -> void:
 
 func test_weapons_bots_four_players() -> void:
 	_replay("weapons_bots_4p")
+
+
+func test_newer_weapons_random_inputs_four_players() -> void:
+	_replay("newer_weapons_random_4p")
+
+
+func test_newer_weapons_bots_four_players() -> void:
+	_replay("newer_weapons_bots_4p")
 
 
 func test_arena_stages_match_the_reference() -> void:

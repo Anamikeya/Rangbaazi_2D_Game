@@ -25,7 +25,7 @@ var _seen: Array = []
 var _seen_frame := -1
 var _was_over := false
 var _last_warn_second := -1
-var _bombs := 0 # cherry bombs in flight last frame: one fewer is a burst
+var _bombs := 0 # bombs, mines, missiles and black holes out last frame: one fewer is a burst
 var _bullets := 0
 var _crates := 0 # weapon crates resting on the stage last frame
 
@@ -131,7 +131,7 @@ func observe(state: GameState, characters: PackedStringArray, you: int, frames_l
 		for f in state.fighters:
 			_seen.append([f.action, f.grounded, f.frozen_by_hit, f.falls, f.pos_x, f.pos_y, f.armor_frames, 0, f.weapon, f.uzi_shots])
 		_was_over = state.match_over
-		_bombs = _count_shots(state, Weapons.SHOT_BOMB)
+		_bombs = _count_bursting(state)
 		_bullets = _count_shots(state, Weapons.SHOT_BULLET)
 		_crates = _count_landed_crates(state)
 		if state.frame < START_FRAME:
@@ -193,7 +193,7 @@ func observe(state: GameState, characters: PackedStringArray, you: int, frames_l
 		s[8] = f.weapon
 		s[9] = f.uzi_shots
 
-	var bombs := _count_shots(state, Weapons.SHOT_BOMB)
+	var bombs := _count_bursting(state)
 	if bombs < _bombs:
 		play("boom", 2.0)
 	_bombs = bombs
@@ -225,6 +225,12 @@ func _count_shots(state: GameState, shot: int) -> int:
 		if p.kind == Weapons.PROP_SHOT and p.shot == shot:
 			n += 1
 	return n
+
+
+## Everything on the stage that ends in a burst.
+func _count_bursting(state: GameState) -> int:
+	return _count_shots(state, Weapons.SHOT_BOMB) + _count_shots(state, Weapons.SHOT_MINE) \
+		+ _count_shots(state, Weapons.SHOT_MISSILE) + _count_shots(state, Weapons.SHOT_HOLE)
 
 
 func _count_landed_crates(state: GameState) -> int:
