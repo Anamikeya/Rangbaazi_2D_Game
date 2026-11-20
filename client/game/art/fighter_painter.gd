@@ -33,6 +33,10 @@ const GUARD_CLIPS := ["idle", "idle_fidget_a", "idle_fidget_b", "select_pose"]
 ## stock expression pasted on top: a second pair of eyes or brows and a second mouth. Until the
 ## pack redraws them, every clip shows the fighter's own face. Set true to use the pack's faces.
 const PACK_FACES := false
+## The pack's two spring pieces per fighter ("detail" and "secondary": a leaf, a hair lock, a tie
+## tip) are mostly stock teardrops and domes pinned to the head at fixed spots, so they sit over an
+## eye, an ear or an antenna; the head art already has its own hat. Set true to draw them again.
+const PACK_EXTRAS := false
 const GUARD_BELOW := 30.0
 const GUARD_KEEP := 0.15
 const FIDGET_AFTER := 300 # frames standing still before an idle fidget
@@ -246,6 +250,8 @@ func draw(canvas: CanvasItem, feet: Vector2, px: float, facing: int, clip_name: 
 		var parent := str(spec.get("parent", ""))
 		var m: Transform2D = (world[parent] if world.has(parent) else _part_transform(clip, parent, f, parts)) * local if parent != "" else local
 		world[part] = m
+		if not PACK_EXTRAS and spec.has("spring"):
+			continue
 		if part == "frontHand":
 			hand_position = (base * m).origin
 			hand_valid = true
