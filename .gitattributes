@@ -68,3 +68,4 @@
 # are small files the build needs, stored in git directly: Git LFS is off for this repository on GitHub.
 client/audio/**  -filter -diff -merge -text
 client/assets/** -filter -diff -merge
+client/icon*.png -filter -diff -merge -text

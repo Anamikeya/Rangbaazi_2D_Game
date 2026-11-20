@@ -47,3 +47,6 @@ desktop.ini
 .env
 *.env
 secrets/
+
+# Godot's Android build template (unpacked from the export templates; see docs/tech/web-client.md)
+client/android/

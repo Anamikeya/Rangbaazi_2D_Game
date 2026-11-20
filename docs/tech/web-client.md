@@ -84,7 +84,7 @@ Local web test: serve `build/web` (e.g. `python -m http.server -d build/web 8060
 
 ## Android
 
-The same client, exported with the **Android** preset in `client/export_presets.cfg`: package `com.zivotix.rangbaazi`, landscape, arm64-v8a, an APK built without Gradle. Online play uses the relay address in `client/net/relay_base_url.txt` (the deploy script writes it; `wss://13-203-5-192.sslip.io` today), and the copy button shares a link to the web game on that host, so a friend without the app can join from a browser.
+The same client, exported with the **Android** preset in `client/export_presets.cfg`: package `com.artificialinteractive.rangbazi`, landscape, arm64-v8a, an APK built without Gradle. Online play uses the relay address in `client/net/relay_base_url.txt` (the deploy script writes it; `wss://13-203-5-192.sslip.io` today), and the copy button shares a link to the web game on that host, so a friend without the app can join from a browser.
 
 Needs, on this PC: the Android SDK (`%LOCALAPPDATA%\Android\Sdk`), a JDK 17+ and Godot 4.7.2's Android export templates; Godot's editor settings point at the SDK, the JDK and its debug keystore.
 
@@ -98,7 +98,26 @@ $env:GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD = 'android'
 adb install -r build/android/rangbaazi.apk   # Xiaomi phones: approve the prompt on the phone
 ```
 
-For the Play Store: create your own upload key (keep it and its password safe, outside the repo), switch on `gradle_build/use_gradle_build` with `gradle_build/export_format` = AAB, and add an app icon (`application/config/icon`).
+### Play Store (internal testing)
+
+The **Android Play** preset builds an AAB with Gradle, which needs Godot's Android build template in `client/android/` (gitignored, 200 MB). In a fresh clone, unpack it first:
+
+```powershell
+Expand-Archive "$env:APPDATA\Godot\export_templates\4.7.2.stable\android_source.zip" client\android\build
+Set-Content client\android\.build_version '4.7.2.stable' -NoNewline; New-Item client\android\build\.gdignore
+```
+
+The bundle is signed with the **upload key** in `%USERPROFILE%\.rangbaazi-keys\` (alias `upload`; the password is in `upload-key.txt` there). It never goes in the repo. Back that folder up: Play App Signing holds the real signing key, so a lost upload key can be reset in Play Console, but that takes days.
+
+```powershell
+$pw = ((Get-Content "$env:USERPROFILE\.rangbaazi-keys\upload-key.txt") | Where-Object { $_ -like 'password: *' }).Substring(10)
+$env:GODOT_ANDROID_KEYSTORE_RELEASE_PATH = "$env:USERPROFILE\.rangbaazi-keys\rangbaazi-upload.jks"
+$env:GODOT_ANDROID_KEYSTORE_RELEASE_USER = 'upload'
+$env:GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD = $pw
+& $g --headless --path client --export-release "Android Play" ../build/android/rangbaazi.aab
+```
+
+Raise `version/code` in the **Android Play** preset before every upload; Play refuses a code it has seen. Upload the AAB under Testing → Internal testing in Play Console. The icons come from `tools/make_icons.gd` (`client/icon.png` is also the 512 px Play Store icon).
 
 ## Next
 
