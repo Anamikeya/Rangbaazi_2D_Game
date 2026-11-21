@@ -88,10 +88,13 @@ public struct Fighter
     public WeaponId Weapon;
     public int WeaponSupply;
 
-    /// <summary>Uzi bullets fired in this burst (the spread pattern), and the hit streak on one target.</summary>
-    public int UziShots;
-    public int UziStreak;
-    public int UziTarget;   // 1 + the fighter the streak is on, or 0
+    /// <summary>
+    /// Shots fired in this hold of a repeating weapon (its spread pattern), and the hit streak on
+    /// one target of a weapon whose sweet spot is a streak.
+    /// </summary>
+    public int BurstShots;
+    public int Streak;
+    public int StreakTarget;   // 1 + the fighter the streak is on, or 0
 
     /// <summary>
     /// The last hit this fighter took: the weapon it came from (None for fists and hazards) and
@@ -104,6 +107,29 @@ public struct Fighter
 
     /// <summary>The second hit of a fist flurry, queued to start when the first one ends; or None.</summary>
     public MoveId FlurryNext;
+
+    // Statuses (combat spec v0.4, section 3.1). In the state and on the wire from batch 1; they stay
+    // 0 until batch 3 gives them behaviour. Cleared on a spawn and on a KO.
+
+    /// <summary>Frames of slow left; also the chill that builds towards a freeze.</summary>
+    public int SlowFrames;
+
+    /// <summary>Frames rooted.</summary>
+    public int RootFrames;
+
+    /// <summary>Frames of poison or burn left, 1 + the fighter credited with it (or 0), and the weapon it is recorded under.</summary>
+    public int DotFrames;
+    public int DotBy;
+    public int DotWeapon;
+
+    /// <summary>Frames marked.</summary>
+    public int MarkFrames;
+
+    /// <summary>Frames in which a stun, slip, root or freeze can't take hold.</summary>
+    public int StunImmune;
+
+    /// <summary>The weapon whose hold (root, stun, slip, freeze) the fighter is in now, or 0.</summary>
+    public int StunWeapon;
 
     public readonly bool IsActive => Action != FighterAction.Respawning && Action != FighterAction.Eliminated;
 
@@ -139,12 +165,33 @@ public struct Fighter
         h.Add(Shield);
         h.Add((int)Weapon);
         h.Add(WeaponSupply);
-        h.Add(UziShots);
-        h.Add(UziStreak);
-        h.Add(UziTarget);
+        h.Add(BurstShots);
+        h.Add(Streak);
+        h.Add(StreakTarget);
         h.Add((int)FlurryNext);
         h.Add((int)LastHitWeapon);
         h.Add(LastHitSweet);
         h.Add(HitCount);
+        h.Add(SlowFrames);
+        h.Add(RootFrames);
+        h.Add(DotFrames);
+        h.Add(DotBy);
+        h.Add(DotWeapon);
+        h.Add(MarkFrames);
+        h.Add(StunImmune);
+        h.Add(StunWeapon);
+    }
+
+    /// <summary>Clears every status: on a spawn, and when the fighter is knocked out.</summary>
+    internal void ClearStatuses()
+    {
+        SlowFrames = 0;
+        RootFrames = 0;
+        DotFrames = 0;
+        DotBy = 0;
+        DotWeapon = 0;
+        MarkFrames = 0;
+        StunImmune = 0;
+        StunWeapon = 0;
     }
 }

@@ -74,7 +74,10 @@ static func look(id: String) -> String:
 static func fighter_name(id: String) -> String:
 	if is_mix(id):
 		var m := mix_parts(id)
-		return m[4] if not m.is_empty() and m[4] != "" else "Custom"
+		if m.is_empty():
+			return "Custom"
+		# No name typed: called after its head's fighter (CharacterCreator.NAME_SUFFIX).
+		return m[4] if m[4] != "" else GameSettings.clean_name(fighter_name(m[0]) + " Jr")
 	for f: Dictionary in fighters():
 		if f["id"] == id:
 			return str(f["name"])

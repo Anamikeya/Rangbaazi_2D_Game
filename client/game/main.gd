@@ -8,7 +8,7 @@ extends Node2D
 ## MENU -> PRACTICE: P1 is you, P2 a SparringBot (Normal). F2 makes P2 a second person on the P2
 ##   keys and back, F3 cycles the CPU level, F4 turns Guts on / off (restarts), F5 / R restarts,
 ##   Esc goes back to the menu. For touch, the menu button in the top-right corner opens a panel
-##   (Resume, Restart, CPU level, Leave) and pauses practice while it is open.
+##   (Resume, Restart, CPU level, Auto play Off / On, Leave) and pauses practice while it is open.
 ## MENU -> ONLINE: create a room (random code) or join one by code, or open the page with
 ##   ?room=CODE on the web. An OnlineSession (client/net) runs the match over the relay; this
 ##   draws session.state and the connection status. R / F5 / Play again / Rematch plays again
@@ -18,7 +18,19 @@ extends Node2D
 ##   The lobby (RoomScreen) shows who's in; the host picks 10 to 15 minutes, adds CPUs and starts.
 ##   In the match the chat button opens the quick-chat phrases. The server returns everyone to the
 ##   lobby after the result. A page opened with ?arena=CODE joins that room.
-## A "Play again" button shows in the middle once a match is over.
+## Once a practice or room match is over the result panel (ResultScreen) shows, with practice's Play
+## again, Change fighter, Change arena and Menu, and a room's countdown to the lobby; a duel keeps
+## its "P1 WINS!" banner and a "Play again" button. The touch controls show only while a fight of
+## ours is on (_fighting).
+## Android's back and Esc (rooms v1, fixes 3 and 4) go through one chain, _on_back: the top overlay
+## closes first (_close_top_overlay: the creator back to the circle, the circle, the arena slider,
+## Settings, How to play, quick chat, the match panel, a question being asked); with none open, a
+## match opens its panel (practice pauses), the lobby asks "Leave the room?  Stay / Leave", a wait
+## for a connection or an opponent is cancelled, and only the bare menu asks "Quit?  No / Yes".
+## Nothing quits the game or leaves a room without asking.
+## While a duel connects or waits, and while a room connects, the chosen arena stands behind a
+## panel with the code, Copy link, Cancel and moving dots (_refresh_wait, fixes 10 and 23). Errors
+## land on the menu's banner with a button for the next step (MenuScreen.error_actions, fix 22).
 ## `-- --smoke` runs the headless scene check instead (see SceneSmoke). `-- --touch` forces the
 ## touch controls on (and lets the mouse act as a finger) for testing them on a desktop.
 
@@ -36,8 +48,19 @@ const COPIED_MSEC := 1500 # how long the copy button says "Copied!"
 ## The square menu button in the top-right corner, and its distance from the screen edges.
 const MENU_BUTTON := 104.0
 const MENU_MARGIN := 20.0
+## The room HUD strip stops this far before Chat's left edge (more and a four-team room of 15
+## collapses at 1920 px; test_review_fixes checks it).
+const HUD_GAP := 12.0
+
+# The winner's nickname for the match on screen (_winner_nick).
+var _nick := Nicknames.Kept.new()
 const LEVEL_NAMES := ["Easy", "Normal", "Hard"] # by SparringBot.Level
 const PLAYERS := 2
+## Where an out-of-date Android app is sent to update (the menu banner's "Update").
+## How often the web page's own timer sends the room's keepalive (_install_web_keepalive): well
+## inside the relay's 60 s idle limit even when a hidden tab's timers run late.
+const WEB_KEEPALIVE_MSEC := 15000
+const STORE_URL := "https://play.google.com/store/apps/details?id=com.artificialinteractive.rangbazi"
 
 var _mode: int = Mode.MENU
 
@@ -65,6 +88,11 @@ var _web_copy_target := "" # what _sync_web_copy last told the page ("" = button
 var _room_session: RoomSession
 var _room_screen: RoomScreen
 var _room_host := false
+## The code of the room this device was last the host of, seen in its lobby: a Rejoin that finds
+## it gone says so and offers a new room (MenuScreen.error_actions).
+var _hosted_room := ""
+## The page timer's callback (_install_web_keepalive), kept so it isn't collected.
+var _web_keepalive_cb: JavaScriptObject
 var _room_tries := 0
 var _settings_screen: SettingsScreen
 var _chat_button: Button
@@ -80,15 +108,24 @@ var _sound: SoundDirector
 const CHAT_BUBBLE_TICKS := 180
 const HOST_RETRIES := 3
 
-## Auto play: a CPU plays the local fighter (in any mode) until the button is pressed again, so a
-## player can step away mid-match. Deliberately only middling, so the others can beat it.
+## Auto play: a CPU plays the local fighter (in any mode) until it is turned off again, so a player
+## can step away mid-match. Deliberately only middling, so the others can beat it. Turned on and
+## off with the "Auto play: Off / On" chips in the match panel (rooms v1, fix 12); an AUTO badge on
+## your HUD chip or player box says it is on.
 const AUTO_LEVEL := SparringBot.Level.NORMAL
-const AUTO_BUTTON := Vector2(250, 62)
 var _auto := false
-var _auto_button: Button
+var _auto_row: ChoiceRow
+
+## The result panel (rooms v1, 3.3), over the arena once a room or practice match is over.
+var _result_layer: CanvasLayer
+var _result: ResultScreen
 
 var _smoke: SceneSmoke
 var _smoke_done := false
+# After the practice run: the result panel and touch checks (SMOKE_TAIL), one step every few frames.
+var _smoke_tail := -1
+var _smoke_wait := 0
+var _smoke_draws := 0
 
 ## Whether to show the touch controls in a match: on where TouchControls.wanted(); on a desktop
 ## with a touchscreen, off once keys or a pad are used and on again at the next real touch.
@@ -112,10 +149,39 @@ var _help_controls: Label
 var _panel_title: Label
 var _panel_note: Label
 var _restart_button: Button
-# Practice options in the panel, every choice in view: who player 2 is, and how good the CPU is.
+# Practice options in the panel, every choice in view: who player 2 is, how good the CPU is, and
+# whether Guts is on (the F2 / F3 / F4 keys are hidden extras for the same).
 var _p2_row: ChoiceRow
 var _level_row: ChoiceRow
+var _guts_row: ChoiceRow
+var _practice_row: HBoxContainer # Restart, Change fighter, Change arena
 var _rematch_button: Button
+var _end_confirm: HBoxContainer
+var _leave_button: Button
+var _leave_confirm: HBoxContainer # "Leave the room?  Stay / Leave"
+# How to play, on touch: the (dimmed, asleep) controls under it, each with a callout.
+var _help_box: PanelContainer
+var _help_center: CenterContainer
+var _help_backdrop: ColorRect
+var _help_callouts: HelpCallouts
+# Quick chat: a strip along the top (the match goes on under it).
+var _chat_strip: PanelContainer
+# The wait panel: a duel connecting or waiting for its opponent, a room connecting.
+var _wait_panel: CenterContainer
+var _wait_title: Label
+var _wait_note: Label
+var _wait_code: Label
+var _wait_code_caption: Label
+var _wait_cancel: Button
+# The frame the last back was handled on (Android can deliver it twice).
+var _back_frame := -1
+# Polish (rooms v1, section 4): the host's remembered team chip waits to be sent until the lobby
+# says we are the host; the team we were last seen on, and when we last asked to change it (the
+# team sound plays for our own pick); the frame-time meter for rooms (its line goes to the log).
+var _room_teams_pending := false
+var _seen_team := -1
+var _team_asked_msec := -100000
+var _meter := FrameMeter.new()
 
 
 func _ready() -> void:
@@ -139,6 +205,7 @@ func _ready() -> void:
 		return
 	if OS.has_feature("web") and TouchControls.handheld():
 		JavaScriptBridge.eval(WEB_LANDSCAPE_JS)
+	_install_web_keepalive()
 	_go_to_menu()
 	var code := _room_from_url()
 	if code != "":
@@ -184,7 +251,7 @@ func _build_nodes() -> void:
 	_again_button = _hud_button(_hud, "Play again", _on_play_again)
 	_again_button.custom_minimum_size = Vector2(380, 110)
 	_again_button.add_theme_font_size_override("font_size", 40)
-	_copy_button = _hud_button(_hud, "Copy link", _on_copy)
+	_build_wait_panel()
 	_chat_button = _hud_button(_hud, "Chat", _open_chat)
 	_chat_button.custom_minimum_size = Vector2(MENU_BUTTON * 1.6, MENU_BUTTON)
 	_chat_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -193,14 +260,6 @@ func _build_nodes() -> void:
 	_chat_button.offset_top = MENU_MARGIN
 	_chat_button.offset_bottom = MENU_MARGIN + MENU_BUTTON
 
-	_auto_button = _hud_button(_hud, "Auto play", func() -> void:
-		_auto = _auto_button.button_pressed
-		_refresh())
-	_auto_button.toggle_mode = true
-	_auto_button.tooltip_text = "Let the CPU play your fighter while you're away"
-	_auto_button.custom_minimum_size = AUTO_BUTTON
-	_auto_button.add_theme_font_size_override("font_size", 26)
-
 	var touch_layer := CanvasLayer.new()
 	touch_layer.name = "Touch"
 	touch_layer.layer = 2
@@ -208,6 +267,20 @@ func _build_nodes() -> void:
 	_touch = TouchControls.new()
 	_touch.visible = false
 	touch_layer.add_child(_touch)
+
+	_result_layer = CanvasLayer.new()
+	_result_layer.name = "Result"
+	_result_layer.layer = 3
+	add_child(_result_layer)
+	_result = ResultScreen.new()
+	_result.visible = false
+	_result_layer.add_child(_result)
+	_result.play_again_pressed.connect(func() -> void:
+		if _mode == Mode.PRACTICE:
+			_restart_practice())
+	_result.change_fighter_pressed.connect(func() -> void: _circle.open(GameSettings.character))
+	_result.change_arena_pressed.connect(_open_practice_picker)
+	_result.menu_pressed.connect(_go_to_menu.bind(""))
 
 	_build_panel()
 	_build_help()
@@ -220,13 +293,25 @@ func _build_nodes() -> void:
 	_room_screen = RoomScreen.new()
 	_room_screen.visible = false
 	room_layer.add_child(_room_screen)
+	# The host's mode chip and minutes are remembered for the next room they host (polish 4).
 	_room_screen.minutes_changed.connect(func(m: int) -> void:
+		if _smoke == null:
+			GameSettings.remember_room(GameSettings.room_teams, m)
 		if _room_session != null: _room_session.set_minutes(m))
 	_room_screen.bots_changed.connect(func(n: int) -> void:
 		if _room_session != null: _room_session.set_bots(n))
+	_room_screen.teams_changed.connect(func(count: int) -> void:
+		if _smoke == null:
+			GameSettings.remember_room(count, GameSettings.room_minutes)
+		_room_teams_pending = false
+		if _room_session != null: _room_session.set_teams(count))
+	_room_screen.team_picked.connect(func(team: int) -> void:
+		_team_asked_msec = Time.get_ticks_msec()
+		if _room_session != null: _room_session.pick_team(team))
 	_room_screen.start_pressed.connect(func() -> void:
 		if _room_session != null: _room_session.start_match())
 	_room_screen.leave_pressed.connect(_go_to_menu.bind(""))
+	_room_screen.copy_requested.connect(_on_copy)
 
 	var picker_layer := CanvasLayer.new()
 	picker_layer.name = "Pickers"
@@ -255,6 +340,9 @@ func _build_nodes() -> void:
 	picker_layer.add_child(_arena_picker)
 	_arena_picker.chosen.connect(_on_arena_chosen)
 	_arena_picker.cancelled.connect(func() -> void: _arena_picker.hide())
+	_arena_picker.skill_picked.connect(func(level: int) -> void:
+		_cpu_level = level
+		_refresh())
 	_room_screen.fighter_requested.connect(func() -> void: _circle.open(GameSettings.character))
 	_room_screen.arena_requested.connect(func() -> void:
 		if _room_session != null and _room_session.is_host():
@@ -275,16 +363,39 @@ func _build_nodes() -> void:
 	add_child(menu_layer)
 	_menu = MenuScreen.new()
 	menu_layer.add_child(_menu)
-	_menu.practice_requested.connect(func() -> void:
-		_picker_for = "practice"
-		_arena_picker.open(GameSettings.arena, "Fight here"))
+	_menu.practice_requested.connect(_open_practice_picker)
 	_menu.fighter_requested.connect(func() -> void: _circle.open(GameSettings.character))
 	_menu.create_requested.connect(func() -> void: _start_online(_new_room_code()))
-	_menu.host_requested.connect(func() -> void:
-		_room_tries = 0
-		_start_room(_new_room_code(), true))
+	_menu.host_requested.connect(_host_room)
 	_menu.join_requested.connect(func(code: String) -> void: _start_room(code, false))
 	_menu.settings_requested.connect(func() -> void: _settings_screen.open())
+	_menu.error_action.connect(_on_error_action)
+
+
+## The arena slider for practice, with the CPU skill chips (rooms v1, fix 28).
+func _open_practice_picker() -> void:
+	_picker_for = "practice"
+	_arena_picker.open(GameSettings.arena, "Fight here", _cpu_level)
+
+
+func _host_room() -> void:
+	_room_tries = 0
+	_start_room(_new_room_code(), true)
+
+
+## A button on the menu's error banner (MenuScreen.error_actions): the next step after an error.
+func _on_error_action(action: String, room: String) -> void:
+	match action:
+		"host":
+			_host_room()
+		"rejoin":
+			if MenuScreen.is_valid_code(room):
+				_start_room(room, false)
+		"refresh":
+			if OS.has_feature("web"):
+				JavaScriptBridge.eval("window.location.reload()")
+		"update":
+			OS.shell_open(STORE_URL)
 
 
 ## A HUD button: never takes keyboard focus, so Space and the arrows stay with the fighters.
@@ -339,14 +450,12 @@ func _build_panel() -> void:
 	box.add_theme_stylebox_override("panel", UiTheme.panel_box())
 	center.add_child(box)
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 20)
-	column.custom_minimum_size = Vector2(820, 0)
+	column.add_theme_constant_override("separation", 14)
+	column.custom_minimum_size = Vector2(1080, 0)
 	box.add_child(column)
 
-	_panel_title = Label.new()
-	_panel_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_panel_title.add_theme_font_size_override("font_size", 52)
-	_panel_title.add_theme_color_override("font_color", UiTheme.ACCENT)
+	# The pickers' and Settings' heading style here too (polish 5).
+	_panel_title = UiTheme.heading("")
 	column.add_child(_panel_title)
 	_panel_note = Label.new()
 	_panel_note.text = "The match keeps going while this is open."
@@ -357,41 +466,81 @@ func _build_panel() -> void:
 	column.add_child(_panel_note)
 
 	UiTheme.make_primary(_panel_button(column, "Resume", _close_panel))
-	_panel_button(column, "How to play", func() -> void:
+	# How to play and Settings side by side (Settings opens over the panel, fix 19).
+	var help_row := HBoxContainer.new()
+	help_row.add_theme_constant_override("separation", 14)
+	column.add_child(help_row)
+	_panel_button(help_row, "How to play", func() -> void:
 		_close_panel()
 		_open_help())
-	_restart_button = _panel_button(column, "Restart", func() -> void:
+	_panel_button(help_row, "Settings", func() -> void: _settings_screen.open())
+	for b in help_row.get_children():
+		(b as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Practice: start over, or with another fighter or arena, without going back to the menu.
+	_practice_row = HBoxContainer.new()
+	_practice_row.add_theme_constant_override("separation", 14)
+	column.add_child(_practice_row)
+	_restart_button = _panel_button(_practice_row, "Restart", func() -> void:
 		_restart_practice()
 		_close_panel())
+	_panel_button(_practice_row, "Change fighter", func() -> void: _circle.open(GameSettings.character))
+	_panel_button(_practice_row, "Change arena", _open_practice_picker)
+	for b in _practice_row.get_children():
+		(b as Control).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		(b as Control).add_theme_font_size_override("font_size", 36)
 	_p2_row = ChoiceRow.make("Player 2", ["CPU", "A friend"], 0, func(i: int) -> void:
 		_p2_cpu = i == 0
-		_refresh(), 230.0, 100.0)
+		_refresh(), 260.0, 88.0)
 	column.add_child(_p2_row)
 	_level_row = ChoiceRow.make("CPU skill", LEVEL_NAMES, 1, func(i: int) -> void:
 		_cpu_level = i
-		_refresh(), 230.0, 100.0)
+		_refresh(), 260.0, 88.0)
 	column.add_child(_level_row)
+	# Guts as chips next to the CPU's skill (it was only on F4): a rule, so it restarts the match.
+	_guts_row = ChoiceRow.make("Guts", ["Off", "On"], 1, func(i: int) -> void:
+		if _guts != (i == 1):
+			_guts = i == 1
+			_restart_practice()
+		_refresh(), 260.0, 88.0)
+	_guts_row.tooltip_text = "The comeback meter: hits taken fill it, then a free big hit"
+	column.add_child(_guts_row)
+	# Auto play as two chips, the current one lit (never a button whose label is its state).
+	_auto_row = ChoiceRow.make("Auto play", ["Off", "On"], 0, func(i: int) -> void:
+		_auto = i == 1
+		_refresh(), 260.0, 96.0)
+	_auto_row.tooltip_text = "Let the CPU play your fighter while you're away"
+	column.add_child(_auto_row)
 	_rematch_button = _panel_button(column, "Rematch", func() -> void:
 		_on_rematch()
 		_close_panel())
-	_end_match_button = _panel_button(column, "End match for everyone", func() -> void:
+	# "End match for everyone" asks first: "End the match?  No / Yes, end it".
+	_end_match_button = _panel_button(column, "End match for everyone", _ask_end_match)
+	_end_confirm = UiTheme.confirm_row("End the match?", "No", "Yes, end it", func() -> void:
+		_end_confirm.hide()
+		_end_match_button.show(), func() -> void:
+		_end_confirm.hide()
 		if _room_session != null:
 			_room_session.end_match()
-		_close_panel())
-	var leave := _panel_button(column, "Leave match", _go_to_menu.bind(""))
-	if UiTheme.can_quit():
-		# Leave and Quit side by side, so the panel doesn't grow taller on a phone.
-		var bottom := HBoxContainer.new()
-		bottom.add_theme_constant_override("separation", 20)
-		column.add_child(bottom)
-		column.remove_child(leave)
-		bottom.add_child(leave)
-		leave.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var quit := UiTheme.quit_button()
-		quit.custom_minimum_size = leave.custom_minimum_size
-		quit.add_theme_font_size_override("font_size", 40)
-		quit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		bottom.add_child(quit)
+		_close_panel(), 100.0, 38)
+	_end_confirm.visible = false
+	column.add_child(_end_confirm)
+	# Leaving a room leaves the room, so the button says so, and asks first (fix 4). Quitting the
+	# game is on the menu, not here next to it (fix 9).
+	_leave_button = _panel_button(column, "Leave match", _on_leave_pressed)
+	_leave_confirm = UiTheme.confirm_row("Leave the room?", "Stay", "Leave", func() -> void:
+		_leave_confirm.hide()
+		_leave_button.show(), func() -> void: _go_to_menu(), 100.0, 38)
+	_leave_confirm.visible = false
+	column.add_child(_leave_confirm)
+
+
+## The panel's leave button: a room asks "Leave the room?  Stay / Leave"; practice and a duel leave.
+func _on_leave_pressed() -> void:
+	if _mode == Mode.ROOM:
+		_leave_button.hide()
+		_leave_confirm.show()
+	else:
+		_go_to_menu()
 
 
 ## The how-to-play card: shown once before the first match (practice waits behind it), and from
@@ -410,24 +559,27 @@ func _build_help() -> void:
 	backdrop.color = Color(0.05, 0.045, 0.07, 0.72)
 	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.add_child(backdrop)
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(center)
+	_help_backdrop = backdrop
+	# On touch: what each of the (dimmed) buttons does, next to it (fix 27).
+	_help_callouts = HelpCallouts.new()
+	_help_callouts.touch = _touch
+	_help_callouts.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_help_callouts.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(_help_callouts)
+	_help_center = CenterContainer.new()
+	_help_center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_help_center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(_help_center)
 	var box := PanelContainer.new()
 	box.add_theme_stylebox_override("panel", UiTheme.panel_box())
-	center.add_child(box)
+	_help_center.add_child(box)
+	_help_box = box
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 18)
 	column.custom_minimum_size = Vector2(980, 0)
 	box.add_child(column)
 
-	var title := Label.new()
-	title.text = "HOW TO PLAY"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 56)
-	title.add_theme_color_override("font_color", UiTheme.ACCENT)
-	column.add_child(title)
+	column.add_child(UiTheme.heading("HOW TO PLAY"))
 	for line: String in [
 		"Knock everyone off the stage. The higher their %, the farther they fly.",
 		"Crates drop weapons. Touch one to grab it; touch another to swap.",
@@ -442,8 +594,8 @@ func _build_help() -> void:
 	_help_controls = Label.new()
 	_help_controls.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_help_controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_help_controls.add_theme_font_size_override("font_size", 28)
-	_help_controls.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
+	_help_controls.add_theme_font_size_override("font_size", 32)
+	_help_controls.add_theme_color_override("font_color", UiTheme.TEXT)
 	column.add_child(_help_controls)
 	var ok := _hud_button(column, "Got it", _close_help)
 	UiTheme.make_primary(ok)
@@ -451,13 +603,24 @@ func _build_help() -> void:
 	ok.add_theme_font_size_override("font_size", 44)
 
 
+## How to play. On touch the card moves to the top, the controls stay on screen under it (dimmed,
+## pressing nothing) and each button has a callout naming what it does; elsewhere the card lists
+## the keys.
 func _open_help() -> void:
-	_help_controls.text = "Kick: attack, or use your weapon.   Heavy: a big hit (with a direction, a different one).\n" \
-		+ "Up + Heavy: leap back to the stage.   Combo: a random flurry of punches.   Throw: hurl your weapon." if _prefer_touch else \
-		"A / D move   Space jump (twice)   J attack or use your weapon   K heavy (W + K leaps back to the stage)\n" \
-		+ "L dodge   I combo (a random flurry)   U throw your weapon   Esc menu"
+	var touch := _prefer_touch and _mode != Mode.MENU
+	_help_controls.visible = not touch
+	_help_controls.text = "A / D move   Space jump (twice)   J Kick: attack or use your weapon   K Heavy (W + K leaps back)\n" \
+		+ "L Dodge   I Combo (a flurry)   U Throw your weapon   Esc pause"
+	_help_callouts.visible = touch
+	# The card in the top part of the screen on touch, so the buttons and callouts show below it.
+	_help_callouts.size = get_viewport_rect().size
+	var bottom := _help_callouts.card_bottom() / maxf(1.0, _help_callouts.size.y)
+	_help_center.anchor_bottom = bottom if touch else 1.0
+	_help_center.offset_bottom = 0
+	_help_backdrop.color = Color(0.05, 0.045, 0.07, 0.5 if touch else 0.72)
 	_help_layer.show()
 	_update_touch()
+	_help_callouts.queue_redraw()
 
 
 func _close_help() -> void:
@@ -471,7 +634,7 @@ func _close_help() -> void:
 
 func _panel_button(parent: Control, text: String, on_pressed: Callable) -> Button:
 	var b := _hud_button(parent, text, on_pressed)
-	b.custom_minimum_size = Vector2(0, 110)
+	b.custom_minimum_size = Vector2(0, 96)
 	b.add_theme_font_size_override("font_size", 40)
 	return b
 
@@ -483,20 +646,33 @@ func _panel_open() -> bool:
 func _open_panel() -> void:
 	if _mode == Mode.MENU:
 		return
+	_chat_layer.hide()
 	_panel_layer.show()
 	_update_touch()
 	_refresh()
 
 
+## The panel's "End match for everyone": swaps the button for the "End the match? No / Yes" chips.
+func _ask_end_match() -> void:
+	_end_match_button.hide()
+	_end_confirm.show()
+
+
 func _close_panel() -> void:
 	if not _panel_layer.visible:
 		return
+	_end_confirm.hide() # the questions are asked again next time
+	_leave_confirm.hide()
+	_leave_button.show()
 	_panel_layer.hide()
 	_update_touch()
 	_refresh()
 
 
-## The quick-chat panel: a grid of the phrases (RoomSession.PHRASES); a tap sends one and closes it.
+## Quick chat (rooms v1, fix 21): a strip along the top, under the HUD band and the top-right
+## buttons, titled "Quick chat", with the phrases (RoomSession.PHRASES) in a row that slides (about
+## six in view) and a Close chip. A tap sends one and closes it. The match goes on under it: your
+## fighter keeps its keys and touch controls while it is open.
 func _build_chat() -> void:
 	_chat_layer = CanvasLayer.new()
 	_chat_layer.name = "Chat"
@@ -505,31 +681,45 @@ func _build_chat() -> void:
 	add_child(_chat_layer)
 	var root := Control.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.theme = UiTheme.build()
 	_chat_layer.add_child(root)
-	var backdrop := ColorRect.new()
-	backdrop.color = Color(0.05, 0.045, 0.07, 0.55)
-	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	backdrop.gui_input.connect(func(event: InputEvent) -> void:
-		var mouse := event as InputEventMouseButton
-		if mouse != null and mouse.pressed and mouse.button_index == MOUSE_BUTTON_LEFT:
-			_close_chat())
-	root.add_child(backdrop)
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(center)
-	var grid := GridContainer.new()
-	grid.columns = 4
-	grid.add_theme_constant_override("h_separation", 16)
-	grid.add_theme_constant_override("v_separation", 16)
-	center.add_child(grid)
+	_chat_strip = PanelContainer.new()
+	var box := UiTheme.panel_box()
+	box.set_content_margin_all(14)
+	_chat_strip.add_theme_stylebox_override("panel", box)
+	_chat_strip.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	_chat_strip.offset_left = MENU_MARGIN
+	_chat_strip.offset_right = -MENU_MARGIN
+	_chat_strip.offset_top = MENU_MARGIN + MENU_BUTTON + 10.0
+	root.add_child(_chat_strip)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	_chat_strip.add_child(row)
+	var title := Label.new()
+	# The heading's colour and case; smaller, as the strip is one row (polish 5).
+	title.text = "QUICK CHAT"
+	title.add_theme_font_size_override("font_size", 34)
+	title.add_theme_color_override("font_color", UiTheme.TEXT_DIM)
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(title)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	scroll.custom_minimum_size = Vector2(0, 88)
+	row.add_child(scroll)
+	var phrases := HBoxContainer.new()
+	phrases.add_theme_constant_override("separation", 12)
+	scroll.add_child(phrases)
 	for i in RoomSession.PHRASES.size():
-		var b := _hud_button(grid, RoomSession.PHRASES[i], func() -> void:
+		var b := _hud_button(phrases, RoomSession.PHRASES[i], func() -> void:
 			if _room_session != null:
 				_room_session.say(i)
 			_close_chat())
-		b.custom_minimum_size = Vector2(380, 96)
+		b.custom_minimum_size = Vector2(0, 84)
+	var close := _hud_button(row, "Close", _close_chat)
+	close.custom_minimum_size = Vector2(150, 84)
 
 
 func _open_chat() -> void:
@@ -543,28 +733,50 @@ func _close_chat() -> void:
 	_update_touch()
 
 
-## The touch controls show in a match where wanted, and hide while the panel is open (so a tap on
-## the panel's buttons can't also press a fighter's).
+## The touch controls show only while they do something (rooms v1, fix 11): where wanted, with a
+## fighter of ours in a match that is running and not over (not while watching, waiting, connecting
+## or on the result), and hide while the panel is open (so a tap on it can't also press a fighter's
+## buttons). Quick chat leaves them live (fix 21); How to play shows them asleep under its callouts
+## (fix 27).
 func _update_touch() -> void:
-	var in_match := _mode != Mode.ROOM or (_room_session != null and _room_session.phase == RoomSession.Phase.PLAYING)
-	var want := _mode != Mode.MENU and in_match and _prefer_touch and not _panel_open() and not _chat_layer.visible and not _help_layer.visible
+	var want := _prefer_touch and _fighting() and not _panel_open()
+	_touch.frozen = _help_layer.visible
 	if _touch.visible != want:
 		_touch.visible = want
 
 
+## Whether a fight is on that this device's fighter is in: practice not over; online running (the
+## opponent here) and not over; in a room playing, with a fighter of ours, and not over.
+func _fighting() -> bool:
+	if _my_fighter() < 0:
+		return false
+	match _mode:
+		Mode.PRACTICE:
+			return _state != null and not _state.match_over
+		Mode.ONLINE:
+			return _phase_is("RUNNING") and _session.state != null and not (_session.state as GameState).match_over
+		Mode.ROOM:
+			return _room_session != null and _room_session.phase == RoomSession.Phase.PLAYING \
+				and _room_session.state != null and not _room_session.state.match_over
+	return false
+
+
 # ---- modes ----
 
-func _go_to_menu(message: String = "") -> void:
+## Back to the menu. message, code and room say why a session ended (the error banner's text and
+## its next-step buttons, MenuScreen.error_actions).
+func _go_to_menu(message: String = "", code := "", room := "", hosting := false) -> void:
 	_close_session()
 	_close_room()
 	_mode = Mode.MENU
 	_state = null
 	_auto = false
+	_close_panel()
 	_panel_layer.hide()
 	_help_layer.hide()
 	_touch.hide()
 	# Keyboard / pad users get focus on the first button; on touch screens a focus ring is noise.
-	_menu.open(message, not _prefer_touch)
+	_menu.open(message, not _prefer_touch, code, room, hosting)
 	_refresh()
 
 
@@ -631,6 +843,7 @@ func _on_fighter_chosen(id: String) -> void:
 		_room_session.set_character(id)
 	if _mode == Mode.PRACTICE:
 		_restart_practice()
+		_close_panel() # picked from the paused panel: straight into the new match
 
 
 func _on_arena_chosen(id: String) -> void:
@@ -650,7 +863,14 @@ func _start_room(code: String, as_host: bool) -> void:
 	_close_session()
 	_close_room()
 	var player_name := GameSettings.player_name if GameSettings.player_name != "" else ("Host" if as_host else "Player")
-	_room_session = RoomSession.new(code, as_host, 10, player_name, GameSettings.character)
+	_install_web_copy() # the lobby's Copy link copies inside the tap on the web
+	_copied_until_msec = 0
+	# A host's room starts with their last match length and, once the lobby says they are the host,
+	# their last mode chip (GameSettings.room_minutes / room_teams, polish 4).
+	_room_session = RoomSession.new(code, as_host, GameSettings.room_minutes if as_host else GameSettings.ROOM_MINUTES_MIN,
+		player_name, GameSettings.character)
+	_room_teams_pending = as_host and GameSettings.room_teams > 0
+	_seen_team = -1
 	_room_host = as_host
 	_mode = Mode.ROOM
 	_room = code
@@ -746,7 +966,7 @@ func _physics_process(_delta: float) -> void:
 
 func _practice_step() -> void:
 	if _smoke != null:
-		if _smoke_done:
+		if _smoke_done or _smoke_tail >= 0:
 			return
 		if _state.frame == SceneSmoke.TOUCH_FROM_FRAME:
 			_touch.show() # draw the touch layout for the rest of the run
@@ -755,9 +975,13 @@ func _practice_step() -> void:
 			if touch_problem != "":
 				_end_smoke(false, touch_problem)
 				return
+		if _smoke.all_weapons:
+			SceneSmoke.arm(_state) # the next weapon in turn, before anyone's buttons are worked out
 		_smoke.press_keys(_state, _rules)
 	if _help_layer.visible:
 		return # the first match waits behind the how-to-play card
+	if _state.match_over and _smoke == null:
+		return # the result stands still behind its panel (the view keeps the winner moving)
 	# Both fighters' buttons come from the same pre-advance state, the CPU's included.
 	for p in PLAYERS:
 		if p == 1 and _p2_cpu:
@@ -772,7 +996,7 @@ func _practice_step() -> void:
 			_end_smoke(false, problem)
 			return
 	Simulation.advance(_state, _rules, _inputs)
-	if _smoke != null and _state.frame >= SceneSmoke.FRAMES:
+	if _smoke != null and _state.frame >= _smoke.frames():
 		_finish_smoke()
 
 
@@ -784,16 +1008,18 @@ func _online_step() -> void:
 
 
 func _room_step() -> void:
-	if _room_session == null:
-		return
+	if _room_session == null or _smoke_tail >= 0:
+		return # the smoke test's room has no server: it only draws
 	var playing := _room_session.phase == RoomSession.Phase.PLAYING
 	if not playing:
 		_auto = false # every match starts with you at the controls
 	var buttons := 0
 	if playing and _auto:
-		buttons = _auto_buttons() # keeps fighting while you chat
-	elif playing and not _chat_layer.visible:
-		buttons = _local_buttons(0)
+		buttons = _auto_buttons()
+	elif playing:
+		buttons = _local_buttons(0) # quick chat's strip leaves the controls live
+	if not playing and _chat_layer.visible:
+		_close_chat()
 	_room_session.tick(buttons)
 	if _room_session.phase == RoomSession.Phase.ENDED:
 		var code := _room_session.end_code
@@ -802,8 +1028,17 @@ func _room_step() -> void:
 			_room_tries += 1
 			_start_room(_new_room_code(), true) # that code was in use: try another
 			return
-		_go_to_menu(message if code != "left" else "")
+		# A host whose room the server never opened tries again by hosting, not by joining a code
+		# that was never made; a host whose room has since closed (EmptyRoomGrace ran out) is told
+		# so, and offered a new one (final round).
+		var hosting := _room_host and _room_session.my_id < 0
+		if code == "no_room" and _room != "" and _room == _hosted_room:
+			message = "Your room %s has closed. Host a new one to play on." % _room
+			hosting = true
+		_go_to_menu(message if code != "left" else "", code, _room, hosting)
 		return
+	if _room_session.is_host():
+		_hosted_room = _room
 	_update_touch()
 
 
@@ -834,38 +1069,13 @@ func _auto_buttons() -> int:
 	return 0
 
 
-## Whether there is a fight on that auto play could take over.
+## Whether there is a fight on that auto play could take over (its chips show in the panel then).
 func _can_auto() -> bool:
-	if _smoke != null or _panel_open() or _help_layer.visible:
+	if _smoke != null or not _fighting():
 		return false
-	var shown: GameState = _arena.state
-	var mine := _my_fighter()
-	if shown == null or shown.match_over or mine < 0 or mine >= shown.fighters.size():
-		return false
-	match _mode:
-		Mode.PRACTICE:
-			return _p2_cpu # with two people at one keyboard, both play
-		Mode.ONLINE:
-			return _phase_is("RUNNING")
-		Mode.ROOM:
-			return _room_session.phase == RoomSession.Phase.PLAYING
-	return false
-
-
-## The auto play button goes under your own stats box; in a room, beside the clock.
-func _place_auto_button() -> void:
-	_auto_button.set_pressed_no_signal(_auto)
-	_auto_button.text = "Auto play: ON" if _auto else "Auto play"
-	_auto_button.modulate = Color("ffd23f") if _auto else Color.WHITE
-	if not _auto_button.visible:
-		return
-	_auto_button.reset_size()
-	if _mode == Mode.ROOM:
-		var view := get_viewport_rect().size
-		_auto_button.position = Vector2(view.x / 2 - 112.0 - _auto_button.size.x, ArenaView.BAR_MARGIN + 4.0)
-	else:
-		var box := _arena.player_box(_my_fighter())
-		_auto_button.position = Vector2(box.position.x, box.end.y + 8.0)
+	if _mode == Mode.PRACTICE:
+		return _p2_cpu # with two people at one keyboard, both play
+	return true
 
 
 ## A person's buttons on this device: P1 is keyboard, first pad and the touch controls. With one
@@ -902,17 +1112,12 @@ func _input(event: InputEvent) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _smoke != null or _mode == Mode.MENU:
+	if _smoke != null:
 		return
 	if event.is_action_pressed(InputReader.BACK):
-		if _circle.visible or _creator.visible or _arena_picker.visible:
-			return # the pickers handle their own Back
-		if _chat_layer.visible:
-			_close_chat()
-		elif _panel_open():
-			_close_panel()
-		else:
-			_go_to_menu()
+		_on_back() # Esc and a pad's Back: the same chain as Android's back button
+	elif _mode == Mode.MENU:
+		return
 	elif _mode == Mode.ROOM:
 		return
 	elif _mode == Mode.ONLINE:
@@ -943,13 +1148,68 @@ func _on_play_again() -> void:
 		_on_rematch()
 
 
-## The panel's CPU button: turns the CPU back on if P2 was a person, else cycles its level.
-func _on_level_pressed() -> void:
-	if _p2_cpu:
-		_cpu_level = (_cpu_level + 1) % LEVEL_NAMES.size()
-	else:
-		_p2_cpu = true
+## Android's back, Esc and a pad's Back (rooms v1, fixes 3 and 4): close the top overlay; with none
+## open, a match opens its panel (practice pauses), the lobby asks "Leave the room?", a wait for a
+## connection or an opponent is cancelled, a finished practice or duel goes to the menu, and the bare
+## menu asks "Quit?  No / Yes". Nothing here quits the game or leaves a room without asking.
+func _on_back() -> void:
+	var frame := Engine.get_process_frames()
+	if frame == _back_frame:
+		return # the same press delivered twice
+	_back_frame = frame
+	if _close_top_overlay():
+		_refresh()
+		return
+	match _mode:
+		Mode.MENU:
+			if UiTheme.can_quit():
+				_menu.ask_quit()
+		Mode.PRACTICE:
+			if _state != null and _state.match_over:
+				_go_to_menu()
+			else:
+				_open_panel()
+		Mode.ONLINE:
+			if _phase_is("RUNNING") and not _can_rematch():
+				_open_panel()
+			else:
+				_go_to_menu() # cancel the wait, or leave a duel that is over
+		Mode.ROOM:
+			if _room_session == null or _room_session.phase == RoomSession.Phase.CONNECTING:
+				_go_to_menu() # not in the room yet: Cancel
+			elif _room_session.phase == RoomSession.Phase.LOBBY:
+				_room_screen.ask_leave()
+			else:
+				_open_panel()
 	_refresh()
+
+
+## Closes whatever is on top, in this order: the creator (back to the circle), the circle, the arena
+## slider, Settings, How to play, quick chat, the match panel, then a question being asked (the
+## lobby's "Leave the room?", the menu's "Quit?"). False if nothing was open.
+func _close_top_overlay() -> bool:
+	if _creator.visible:
+		_creator.hide()
+		_circle.open(GameSettings.character)
+	elif _circle.visible:
+		_circle.hide()
+	elif _arena_picker.visible:
+		_arena_picker.hide()
+	elif _settings_screen.visible:
+		_settings_screen.close()
+	elif _help_layer.visible:
+		_close_help()
+	elif _chat_layer.visible:
+		_close_chat()
+	elif _panel_open():
+		_close_panel()
+	elif _room_screen.visible and _room_screen.leave_asked():
+		_room_screen.cancel_leave()
+	elif _menu.visible and _menu.quit_asked():
+		_menu.cancel_quit()
+	else:
+		return false
+	return true
 
 
 func _on_rematch() -> void:
@@ -968,6 +1228,7 @@ func _on_copy() -> void:
 	else:
 		DisplayServer.clipboard_set(_copy_text())
 		_copied_until_msec = Time.get_ticks_msec() + COPIED_MSEC
+		_sound.copied()
 
 
 func _copy_label() -> String:
@@ -980,21 +1241,33 @@ func _copy_text() -> String:
 	return _share_link if _share_link != "" else _room
 
 
+## The copy button on screen now: the lobby's Copy link, the duel's on the wait panel, or null.
+## (Android has no share sheet the engine can open, so there too it copies: rooms v1, fix 7.)
+func _active_copy_button() -> Button:
+	if _room_screen.visible and not _room_screen.leave_asked():
+		return _room_screen.copy_button()
+	if _copy_button.is_visible_in_tree():
+		return _copy_button
+	return null
+
+
 ## Web: tells the page where the copy button is (in canvas pixels) and what it copies, or that it's
 ## hidden, whenever that changes; then picks up a copy the page finished ("Copied!" shows only then).
 func _sync_web_copy() -> void:
 	if not OS.has_feature("web"):
 		return
 	var target := ""
-	if _copy_button.visible:
-		var r := get_viewport().get_final_transform() * _copy_button.get_global_rect()
+	var button := _active_copy_button()
+	if button != null:
+		var r := get_viewport().get_final_transform() * button.get_global_rect()
 		target = "%s, %d, %d, %d, %d" % [JSON.stringify(_copy_text()),
 			floori(r.position.x), floori(r.position.y), ceili(r.size.x), ceili(r.size.y)]
 	if target != _web_copy_target:
 		_web_copy_target = target
 		JavaScriptBridge.eval("window.rangbaaziCopy && window.rangbaaziCopy.target(%s)" % (target if target != "" else "null"))
-	if _copy_button.visible and str(JavaScriptBridge.eval("window.rangbaaziCopy ? window.rangbaaziCopy.take() : ''")) == "copied":
+	if button != null and str(JavaScriptBridge.eval("window.rangbaaziCopy ? window.rangbaaziCopy.take() : ''")) == "copied":
 		_copied_until_msec = Time.get_ticks_msec() + COPIED_MSEC
+		_sound.copied()
 
 
 ## Browsers only let a page write the clipboard inside a click or tap's own event handler (Safari
@@ -1042,7 +1315,7 @@ const WEB_COPY_JS := """
 		return ok;
 	}
 	function byHand(text) {
-		window.prompt('Copy this link and send it to your opponent:', text);
+		window.prompt('Copy this link and send it to your friends:', text);
 	}
 	function copy(text) {
 		lastCopy = performance.now();
@@ -1131,6 +1404,24 @@ const WEB_LANDSCAPE_JS := """
 """
 
 
+## On the web a hidden tab gets no frames, so the room's keepalive (RoomSession.tick) stops and the
+## relay would close the connection after 60 s of silence: a host who switches apps to share the
+## link loses the room. A page timer, which browsers still run (about once a second at most) in a
+## hidden tab, sends it instead (final round).
+func _install_web_keepalive() -> void:
+	if not OS.has_feature("web") or _web_keepalive_cb != null:
+		return
+	_web_keepalive_cb = JavaScriptBridge.create_callback(_on_web_keepalive)
+	var window := JavaScriptBridge.get_interface("window")
+	if window != null:
+		window.setInterval(_web_keepalive_cb, WEB_KEEPALIVE_MSEC)
+
+
+func _on_web_keepalive(_args: Array) -> void:
+	if _room_session != null:
+		_room_session.keepalive()
+
+
 func _install_web_copy() -> void:
 	if OS.has_feature("web"):
 		JavaScriptBridge.eval(WEB_COPY_JS)
@@ -1147,13 +1438,9 @@ func _notification(what: int) -> void:
 			if _smoke == null:
 				InputReader.release_all()
 		NOTIFICATION_WM_GO_BACK_REQUEST:
-			if _mode == Mode.MENU:
-				get_tree().quit()
-			elif _smoke == null:
-				if _panel_open():
-					_close_panel()
-				else:
-					_go_to_menu()
+			# Android's back button (quit_on_go_back is off): never quits from here.
+			if _smoke == null:
+				_on_back()
 
 
 func _exit_tree() -> void:
@@ -1211,22 +1498,46 @@ func _make_share_link(code: String, relay_url: String) -> String:
 	var path := str(JavaScriptBridge.eval("window.location.pathname"))
 	if not path.begins_with("/"):
 		path = "/"
-	return "%s%s?room=%s" % [origin, path, code]
+	# A local test page's ?relay= (OnlineSession.relay_url_for_room) goes along, so a second tab
+	# opened from the link finds the same relay.
+	var relay := str(JavaScriptBridge.eval("new URLSearchParams(window.location.search).get('relay') || ''"))
+	return share_link_for(origin, path, code, relay)
+
+
+## The web share link: the page's address with ?room=CODE, plus ?relay= when the page has a local
+## test relay's address (ws://127.0.0.1 or localhost; anything else is dropped).
+static func share_link_for(origin: String, path: String, code: String, relay := "") -> String:
+	var link := "%s%s?room=%s" % [origin, path, code]
+	if relay.begins_with("ws://127.0.0.1:") or relay.begins_with("ws://localhost:"):
+		link += "&relay=" + relay.uri_encode()
+	return link
 
 
 # ---- view ----
 
 ## Hands the arena what to draw and shows the HUD buttons that apply. Reads state only.
 func _refresh() -> void:
+	if _smoke == null:
+		_update_touch() # the controls go as soon as they would do nothing (the match ended, say)
 	_arena.names = PackedStringArray()
 	_arena.tags = PackedStringArray()
 	_arena.status_big = ""
 	_arena.status_small = PackedStringArray()
 	_arena.over_hint = ""
 	_arena.debug_text = ""
-	# Keep the arena's touch layout while the panel hides the controls, so it doesn't jump.
-	_arena.touch_layout = _touch.visible or (_panel_open() and _prefer_touch)
-	_arena.hud_right_inset = MENU_BUTTON + MENU_MARGIN
+	# Keep the arena's touch layout while the panel hides the controls or the result is up, so the
+	# arena doesn't jump. Watching, it uses the whole screen.
+	var over := _arena.state != null and _arena.state.match_over
+	_arena.touch_layout = _touch.visible or (_prefer_touch and _my_fighter() >= 0 and (_panel_open() or over) and _mode != Mode.MENU)
+	# Text sizes follow the device, not the layout: a watcher on a phone has the whole screen but
+	# still reads the touch sizes (rooms v1, 2.6).
+	_arena.touch_text = _prefer_touch or TouchControls.handheld()
+	# The HUD keeps clear of the top-right buttons: the menu, and in a room Chat too (rooms v1, 3.1),
+	# with a gap before Chat's edge so the last chip and Chat aren't one tap target.
+	_arena.hud_right_inset = 2.0 * MENU_MARGIN + 2.6 * MENU_BUTTON + HUD_GAP if _mode == Mode.ROOM else MENU_BUTTON + MENU_MARGIN
+	_arena.hud_top_inset = MENU_MARGIN + MENU_BUTTON + 10.0
+	_arena.auto_on = _auto
+	_arena.show_banner = _mode == Mode.ONLINE # practice and rooms have the result panel
 	_hud.visible = _mode != Mode.MENU
 	match _mode:
 		Mode.PRACTICE:
@@ -1240,13 +1551,12 @@ func _refresh() -> void:
 			_arena.fighter_characters = PackedStringArray()
 	_arena.room_mode = _mode == Mode.ROOM
 	_arena.shake_enabled = GameSettings.effects
-	_arena.show_hitboxes = GameSettings.show_hitboxes
+	_arena.show_hitboxes = GameSettings.show_hitboxes and SettingsScreen.developer_rows()
 	_arena.dynamic_camera = GameSettings.follow_camera
 	_chat_button.visible = _mode == Mode.ROOM and _room_session != null \
 		and _room_session.phase == RoomSession.Phase.PLAYING and not _panel_open()
 	# Each set once per refresh: hiding a button, even for an instant, cancels a press in progress.
-	_again_button.visible = not _panel_open() and _can_play_again()
-	_copy_button.visible = _mode == Mode.ONLINE and _phase_is("WAITING_FOR_OPPONENT")
+	_again_button.visible = not _panel_open() and _mode == Mode.ONLINE and _can_play_again()
 
 	match _mode:
 		Mode.MENU:
@@ -1258,8 +1568,15 @@ func _refresh() -> void:
 			_refresh_online()
 		Mode.ROOM:
 			_refresh_room()
-	if not GameSettings.show_debug and _smoke == null:
+	# The lobby has its own Leave room and back question: the match menu button would only ghost
+	# through its backdrop.
+	_menu_button.visible = not _room_screen.visible
+	if not (GameSettings.show_debug and SettingsScreen.developer_rows()) and _smoke == null:
 		_arena.debug_text = ""
+	# The wait panel says it all while waiting: no status lines over the arena behind it.
+	if _refresh_wait():
+		_arena.status_big = ""
+		_arena.status_small = PackedStringArray()
 	# A phone held upright (and not turned by the fullscreen lock): the arena is tiny that way.
 	var view := get_viewport_rect().size
 	if _mode != Mode.MENU and _prefer_touch and view.y > view.x:
@@ -1274,10 +1591,8 @@ func _refresh() -> void:
 		mine = int(_session.local_slot)
 	var shown: GameState = _arena.state
 	_touch.weapon = shown.fighters[mine].weapon if shown != null and mine >= 0 and mine < shown.fighters.size() else 0
-	_auto_button.visible = _can_auto()
 	_update_sound()
-	_place_auto_button()
-	_place_copy_button()
+	_refresh_result()
 	_place_again_button()
 	_refresh_panel()
 	_sync_web_copy()
@@ -1310,7 +1625,11 @@ func _update_sound() -> void:
 	_sound.set_scene(folder if folder != "" else "shahn")
 	var you: int = _arena.you_index if _mode == Mode.ROOM else (0 if _mode == Mode.PRACTICE else (_session.local_slot if _session != null else 0))
 	var frames_left: int = _room_session.frames_left if _mode == Mode.ROOM and _room_session != null else -1
-	_sound.observe(_arena.state, _arena.fighter_characters, you, frames_left)
+	_sound.arena_half = _arena.half_width() + 1.0 # 17 m, or 25 m on the big level
+	# Two people at one keyboard: nobody is "you", so both hear the winner's jingle.
+	if _mode == Mode.PRACTICE and not _p2_cpu:
+		you = -1
+	_sound.observe(_arena.state, _arena.fighter_characters, you, frames_left, _arena.rules)
 
 
 ## A keyboard hint, or "" where the touch controls are in use (the buttons say it there).
@@ -1328,14 +1647,86 @@ func _can_play_again() -> bool:
 	return false
 
 
-## The copy button goes under the status lines (online, while waiting for an opponent).
-func _place_copy_button() -> void:
-	if not _copy_button.visible:
-		return
-	_copy_button.text = _copy_label()
-	var view := get_viewport_rect().size
-	_copy_button.reset_size()
-	_copy_button.position = Vector2((view.x - _copy_button.size.x) / 2, _arena.status_bottom() + 10.0)
+## The wait panel (rooms v1, fixes 10 and 23): centred over the player's own arena while a duel
+## connects or waits for its opponent and while a room connects. A title with moving dots, a line
+## saying what is happening, the code in large type, Cancel, and (a duel waiting) Copy link.
+func _build_wait_panel() -> void:
+	_wait_panel = CenterContainer.new()
+	_wait_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_wait_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_wait_panel.visible = false
+	_hud.add_child(_wait_panel)
+	var box := PanelContainer.new()
+	box.add_theme_stylebox_override("panel", UiTheme.panel_box())
+	_wait_panel.add_child(box)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 14)
+	column.custom_minimum_size = Vector2(900, 0)
+	box.add_child(column)
+	_wait_title = _wait_label(column, 56, UiTheme.ACCENT)
+	_wait_note = _wait_label(column, 32, UiTheme.TEXT)
+	_wait_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_wait_code_caption = _wait_label(column, 28, UiTheme.TEXT_DIM)
+	_wait_code_caption.text = "ROOM CODE"
+	_wait_code = _wait_label(column, 110, UiTheme.TEXT)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 20)
+	column.add_child(row)
+	_wait_cancel = _hud_button(row, "Cancel", _go_to_menu.bind(""))
+	_wait_cancel.custom_minimum_size = Vector2(0, 104)
+	_wait_cancel.add_theme_font_size_override("font_size", 40)
+	_wait_cancel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_copy_button = _hud_button(row, "Copy link", _on_copy)
+	_copy_button.custom_minimum_size = Vector2(0, 104)
+	_copy_button.add_theme_font_size_override("font_size", 40)
+	_copy_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UiTheme.make_primary(_copy_button)
+
+
+func _wait_label(parent: Control, font_size: int, colour: Color) -> Label:
+	var l := Label.new()
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.add_theme_font_size_override("font_size", font_size)
+	l.add_theme_color_override("font_color", colour)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(l)
+	return l
+
+
+## What the wait panel says now, or hides it (see _build_wait_panel). Returns whether it shows.
+func _refresh_wait() -> bool:
+	var title := ""
+	var note := ""
+	var copy := false
+	if _mode == Mode.ONLINE and _session != null:
+		if _phase_is("CONNECTING"):
+			title = "Connecting"
+			note = "Opening your duel room."
+		elif _phase_is("WAITING_FOR_OPPONENT"):
+			title = "Waiting for your opponent"
+			note = "Send them the link, or they type the code under Join on the menu." if _share_link != "" \
+				else "They type the code under Join on the menu."
+			copy = true
+		elif _phase_is("STARTING"):
+			title = "Starting"
+			note = "Your opponent is here."
+	elif _mode == Mode.ROOM and _room_session != null and _room_session.phase == RoomSession.Phase.CONNECTING:
+		title = "Connecting"
+		note = "Opening your room." if _room_host else "Joining the room."
+	var show := title != "" and not _panel_open()
+	_wait_panel.visible = show
+	if show:
+		_wait_title.text = title + UiTheme.dots()
+		_wait_note.text = note
+		_wait_code.text = _room
+		_copy_button.visible = copy
+		_copy_button.text = _copy_label()
+	return show
+
+
+## The wait panel's Cancel, for tests.
+func wait_cancel_button() -> Button:
+	return _wait_cancel
 
 
 ## "Play again" goes under "P1 WINS!" and its hint, or under the status lines (online, when the
@@ -1355,16 +1746,54 @@ func _refresh_panel() -> void:
 	if not _panel_open():
 		return
 	var practice := _mode == Mode.PRACTICE
-	_panel_title.text = "Paused" if practice else "Menu"
+	_panel_title.text = "PAUSED" if practice else "MATCH MENU"
 	_panel_note.visible = not practice
-	_restart_button.visible = practice
-	_p2_row.visible = practice
+	_practice_row.visible = practice
+	# A second person needs keys or a pad: on a phone with no pad, "A friend" would have no controls.
+	_p2_row.visible = practice and (not _prefer_touch or not Input.get_connected_joypads().is_empty() or not _p2_cpu)
 	_p2_row.select(0 if _p2_cpu else 1)
 	_level_row.visible = practice and _p2_cpu
 	_level_row.select(_cpu_level)
+	_guts_row.visible = practice
+	_guts_row.select(1 if _guts else 0)
 	_rematch_button.visible = _mode == Mode.ONLINE and _can_rematch()
-	_end_match_button.visible = _mode == Mode.ROOM and _room_session != null and _room_session.is_host() \
+	var can_end := _mode == Mode.ROOM and _room_session != null and _room_session.is_host() \
 		and _room_session.phase == RoomSession.Phase.PLAYING
+	_end_confirm.visible = can_end and _end_confirm.visible
+	_end_match_button.visible = can_end and not _end_confirm.visible
+	_auto_row.visible = _can_auto()
+	_auto_row.select(1 if _auto else 0)
+	_leave_button.text = "Leave room" if _mode == Mode.ROOM else "Leave match"
+	_leave_button.visible = not _leave_confirm.visible
+
+
+## The winner's nickname for the match on screen, the same on every tick it stays over
+## (Nicknames.Kept).
+func _winner_nick(s: GameState, code := -1) -> String:
+	return _nick.for_match(s, code)
+
+
+## The result panel: shown once a practice match or a room's match is over (with the touch
+## controls hidden, _fighting), hidden otherwise. A duel keeps its banner and Play again.
+func _refresh_result() -> void:
+	var shown: GameState = _arena.state
+	var want := shown != null and shown.match_over and (_mode == Mode.PRACTICE or _mode == Mode.ROOM)
+	_arena.hide_tags = want
+	if not want:
+		if _result.visible:
+			_result.hide()
+		return
+	if _mode == Mode.PRACTICE:
+		var you := 0 if _p2_cpu else -1
+		_result.show_practice(shown, _arena.rules, _arena.names, _arena.fighter_characters, you, _winner_nick(shown),
+			_keys_hint("R = play again   Esc = menu"))
+	else:
+		var s := _room_session
+		var winner := shown.winner_index
+		var nick := _winner_nick(shown, s.main_weapons[winner] if winner >= 0 and winner < s.main_weapons.size() else Nicknames.ALL_ROUNDER)
+		var left := s.result_left()
+		_result.show_room(shown, _arena.rules, _arena.names, _arena.fighter_characters, s.my_fighter, nick,
+			left, ceili(maxf(left, 0.0) * RoomSession.RESULT_TICKS / 60.0))
 
 
 func _refresh_practice() -> void:
@@ -1381,11 +1810,11 @@ func _refresh_practice() -> void:
 		tags.append("CPU" if cpu else ("AUTO" if _auto else "YOU") if you else "")
 	_arena.names = names
 	_arena.tags = tags
-	var nick := Nicknames.for_winner(_state)
+	var nick := _winner_nick(_state)
 	_arena.over_hint = (nick + "   " if nick != "" else "") + _keys_hint("R / F5 / Restart = play again   Esc = menu")
 	var checksum := StateHasher.hex(_state.checksum())
 	if _smoke != null:
-		_arena.debug_text = "SMOKE TEST (bots)   frame %d/%d   checksum %s" % [_state.frame, SceneSmoke.FRAMES, checksum]
+		_arena.debug_text = "SMOKE TEST (bots)   frame %d/%d   checksum %s" % [_state.frame, _smoke.frames(), checksum]
 	else:
 		_arena.debug_text = "frame %d   checksum %s   F2 = P2 %s   F3 = CPU level: %s   F4 = Guts %s   F5 / R = restart   Esc = menu" % [
 			_state.frame, checksum, "CPU" if _p2_cpu else "person", LEVEL_NAMES[_cpu_level], "on" if _guts else "off"]
@@ -1397,11 +1826,31 @@ func _refresh_room() -> void:
 		return
 	var playing := s.phase == RoomSession.Phase.PLAYING
 	_room_screen.visible = s.phase == RoomSession.Phase.LOBBY and not _panel_open()
+	if s.phase == RoomSession.Phase.LOBBY and s.room_phase == "lobby":
+		if _room_teams_pending and s.is_host():
+			_room_teams_pending = false
+			if s.team_count != GameSettings.room_teams:
+				s.set_teams(GameSettings.room_teams)
+		# Your own pick of a team landed: a small confirmation (polish 2).
+		var team := s.my_team()
+		if _seen_team >= 0 and team > 0 and team != _seen_team and Time.get_ticks_msec() - _team_asked_msec < 3000:
+			_sound.team_joined()
+		_seen_team = team
 	if _room_screen.visible:
 		_room_screen.show_lobby(s, _share_link)
+		_room_screen.set_copy_label(_copy_label())
+	elif _room_screen.leave_asked():
+		_room_screen.cancel_leave() # the match started: the question is moot
 	_arena.rules = s.rules if s.rules != null else MatchRules.room(StageDefinition.rooftops(), 10)
+	if s.phase == RoomSession.Phase.CONNECTING:
+		_arena.rules = _menu_rules() # your own arena behind the wait panel
 	_arena.state = s.state if playing else null
 	_arena.names = s.fighter_names
+	# Someone who left mid-match: the CPU plays their fighter now, and its tag says so.
+	var tags := PackedStringArray()
+	for i in s.fighter_names.size():
+		tags.append("CPU" if playing and s.fighter_left(i) else "")
+	_arena.tags = tags
 	_arena.you_index = s.my_fighter
 	_arena.time_left_frames = s.frames_left
 	var bubbles: Array = []
@@ -1415,10 +1864,11 @@ func _refresh_room() -> void:
 		_arena.status_small = PackedStringArray(["Room %s" % s.room])
 	elif playing and s.state != null and s.state.match_over:
 		var winner := s.state.winner_index
-		var nick := Nicknames.for_winner(s.state, s.main_weapons[winner] if winner >= 0 and winner < s.main_weapons.size() else Nicknames.ALL_ROUNDER)
+		var nick := _winner_nick(s.state, s.main_weapons[winner] if winner >= 0 and winner < s.main_weapons.size() else Nicknames.ALL_ROUNDER)
 		_arena.over_hint = "%s   Back to the lobby in a moment..." % nick if nick != "" else "Back to the lobby in a moment..."
 	elif playing and s.my_fighter < 0:
-		_arena.status_small = PackedStringArray(["You're watching: you'll play in the next match."])
+		_arena.status_small = PackedStringArray(["You're watching: you'll get a team in the next match." if s.team_count > 0
+			else "You're watching: you'll play in the next match."])
 	_arena.debug_text = "ROOM %s   %d players   frame %d" % [s.room, s.players.size(), s.state.frame if s.state != null else 0]
 
 
@@ -1428,8 +1878,10 @@ func _refresh_online() -> void:
 	var s = _session # OnlineSession
 	var state: GameState = s.state
 	var slot: int = s.local_slot
-	_arena.state = state
-	_arena.rules = s.rules if s.rules != null else _rules
+	# Before the match: the player's own arena stands behind the wait panel (fix 10), not a graybox.
+	var waiting := _phase_is("CONNECTING") or _phase_is("WAITING_FOR_OPPONENT") or _phase_is("STARTING")
+	_arena.state = null if waiting else state
+	_arena.rules = _menu_rules() if waiting else (s.rules if s.rules != null else _rules)
 	var names := PackedStringArray()
 	var tags := PackedStringArray()
 	for i in PLAYERS:
@@ -1438,20 +1890,10 @@ func _refresh_online() -> void:
 	_arena.names = names
 	_arena.tags = tags
 
-	# Connection status over the arena.
+	# Connection status over the arena (before the match, the wait panel says it: _refresh_wait).
 	var big := ""
 	var small := PackedStringArray()
-	if _phase_is("CONNECTING"):
-		big = "Connecting..."
-		small.append("Room %s" % _room)
-	elif _phase_is("WAITING_FOR_OPPONENT"):
-		big = "Waiting for your opponent..."
-		small.append("Room %s" % _room)
-		if _share_link != "":
-			small.append("Share this link: %s" % _share_link)
-	elif _phase_is("STARTING"):
-		big = "Starting..."
-	elif _phase_is("RUNNING"):
+	if _phase_is("RUNNING"):
 		if s.interrupted:
 			big = "Connection interrupted..."
 		elif _stalled_ticks > STALL_NOTICE_TICKS:
@@ -1461,7 +1903,7 @@ func _refresh_online() -> void:
 		if not _prefer_touch:
 			small.append("R / F5 / Play again = play again, Esc = menu")
 	if _phase_is("RUNNING") and state != null and state.match_over:
-		var nick := Nicknames.for_winner(state)
+		var nick := _winner_nick(state)
 		_arena.over_hint = (nick + "   " if nick != "" else "") + _keys_hint("R / F5 / Play again = play again   Esc = menu")
 	_arena.status_big = big
 	_arena.status_small = small
@@ -1479,16 +1921,38 @@ func _begin_smoke() -> void:
 	_p2_cpu = true
 	_cpu_level = SceneSmoke.P2_LEVEL
 	_guts = true
-	print("SCENE SMOKE: practice, P1 = SparringBot Hard on P1's keys, P2 = CPU Normal, %d frames" % SceneSmoke.FRAMES)
+	print("SCENE SMOKE: practice, P1 = SparringBot Hard on P1's keys, P2 = CPU Normal, %d frames%s" % [_smoke.frames(),
+		", every crate weapon in turn (%d of them)" % Weapons.crate_list().size() if _smoke.all_weapons else ""])
 	_go_to_menu() # through the menu, as a person would
 	_start_practice()
 
 
 func _process(_delta: float) -> void:
+	_measure_frame()
+	if _smoke != null and not _smoke_done and _smoke_tail >= 0:
+		_smoke_tail_tick()
 	# Watchdog: a run that stops advancing (or never starts) still ends, with exit code 1.
 	if _smoke != null and not _smoke_done and _smoke.timed_out():
 		_end_smoke(false, "timed out after %d ms at frame %d%s" % [
 			SceneSmoke.TIMEOUT_MSEC, _state.frame if _state != null else -1, _smoke.error_note()])
+
+
+## While a room's match is on, every frame goes to the FrameMeter, and every 5 s its line (average
+## frame time and rate, the slowest frame, the arena's drawing time) is printed to the log: on
+## Android, `adb logcat -s godot:I` shows it; on the web, the browser's console (polish 6). Nothing
+## shows on screen, so release builds carry it too.
+func _measure_frame() -> void:
+	var s := _room_session
+	if _mode != Mode.ROOM or s == null or s.phase != RoomSession.Phase.PLAYING or _arena.state == null or _smoke != null:
+		_meter.reset()
+		return
+	if not _meter.frame(Time.get_ticks_usec(), _arena.last_draw_usec):
+		return
+	var view := get_viewport().get_visible_rect().size
+	var screen := DisplayServer.window_get_size()
+	print(_meter.line("room of %d fighters, %s level, %dx%d window (%dx%d logical), %s" % [_arena.state.fighters.size(),
+		"big" if _arena.rules.stage.size == StageDefinition.SIZE_BIG else "normal", screen.x, screen.y, view.x, view.y,
+		"web" if OS.has_feature("web") else OS.get_name()]))
 
 
 func _finish_smoke() -> void:
@@ -1499,7 +1963,7 @@ func _finish_smoke() -> void:
 	if reference_rules.fingerprint() != _rules.fingerprint():
 		_end_smoke(false, "the practice rules differ from the defaults the reference run uses")
 		return
-	var expected := SceneSmoke.reference_checksum(reference_rules)
+	var expected := SceneSmoke.reference_checksum(reference_rules, _smoke.all_weapons)
 	var actual := _state.checksum()
 	if actual != expected:
 		_end_smoke(false, "frames=%d checksum=%s but the pure sim run gives %s%s" % [
@@ -1509,9 +1973,287 @@ func _finish_smoke() -> void:
 	if problem != "":
 		_end_smoke(false, problem)
 		return
-	print("SCENE SMOKE: P1 held buttons on %d frames, arena drew the match %d times, touch self-test passed" % [
-		_smoke.pressed_frames, _arena.match_draws])
-	_end_smoke(true, "frames=%d checksum=%s" % [_state.frame, StateHasher.hex(actual)])
+	var view_problem := SceneSmoke.whole_level_problem()
+	if view_problem != "":
+		_end_smoke(false, view_problem)
+		return
+	print("SCENE SMOKE: P1 held buttons on %d frames, arena drew the match %d times, touch self-test passed, whole level visible in rooms at %d sizes" % [
+		_smoke.pressed_frames, _arena.match_draws, 2 * SceneSmoke.VIEW_WINDOWS.size()])
+	_smoke_pass_detail = "frames=%d checksum=%s" % [_state.frame, StateHasher.hex(actual)]
+	_smoke_tail = 0
+	_smoke_wait = 0
+
+
+## The smoke test's last part (rooms v1, 6.4): the result panel shows with the touch controls
+## hidden, in practice and in a room of 15 on four teams (drawn, with the HUD strip, for a few
+## frames each, so a drawing error fails the run); the controls are on while a room's match runs and
+## off while watching. Each step sets the scene up, then is checked SMOKE_SETTLE frames later.
+const SMOKE_SETTLE := 3
+var _smoke_pass_detail := ""
+
+
+func _smoke_tail_tick() -> void:
+	if _smoke_wait > 0:
+		_smoke_wait -= 1
+		_refresh()
+		return
+	var problem := ""
+	match _smoke_tail:
+		0: # practice over, on a phone: the result, and no touch controls over it
+			_prefer_touch = true
+			_touch.show()
+			_state.match_over = true
+			_state.winner_index = 0
+			_refresh()
+			_update_touch()
+		1:
+			problem = _smoke_result_problem("practice", true)
+			if problem == "":
+				_smoke_room(false)
+		2: # a room of 15 playing: the controls are on, the result isn't
+			if not _touch.visible:
+				problem = "touch: the controls are hidden while a room's match runs"
+			elif _result.visible:
+				problem = "result: the panel shows while the match runs"
+			_smoke_draws = _arena.match_draws
+			if problem == "":
+				_room_session.state.match_over = true
+				_room_session.state.winner_index = 0
+				_room_session.note_over()
+				_refresh()
+				_update_touch()
+		3:
+			problem = _smoke_result_problem("room", false)
+			if problem == "" and _arena.match_draws <= _smoke_draws:
+				problem = "result: the room's arena stopped drawing behind the result panel"
+			if problem == "": # watching: no fighter of ours, so no controls
+				_room_session.state.match_over = false
+				_room_session.my_fighter = -1
+				_refresh()
+				_update_touch()
+		4:
+			if _touch.visible:
+				problem = "touch: the controls show while watching"
+			elif _result.visible:
+				problem = "result: the panel shows while watching a match that runs"
+			if problem == "":
+				problem = _smoke.errors_problem()
+			if problem == "":
+				print("SCENE SMOKE: the result panel showed with the touch controls hidden (practice, and a room of 15 in four teams); the controls were on in the room's match and off while watching")
+				# Back in a match (watching it): the panel opens, the room stays.
+				problem = _smoke_back_in_match() # ends on the menu, for the screens' back checks
+		5:
+			problem = _smoke_back_problem()
+			if problem == "":
+				_smoke_lobby()
+		6:
+			problem = _smoke_lobby_problem()
+			if problem == "":
+				problem = _smoke.errors_problem()
+			if problem == "":
+				print("SCENE SMOKE: Android back closed Settings, the circle, the creator and the arena slider and never quit; in a room it opened the panel or asked to leave; the 15-member lobby kept Leave room and START on screen at %d sizes" % SceneSmoke.VIEW_WINDOWS.size())
+				_end_smoke(true, _smoke_pass_detail)
+				return
+	if problem != "":
+		_end_smoke(false, problem)
+		return
+	_smoke_tail += 1
+	_smoke_wait = SMOKE_SETTLE
+
+
+## "" if the result panel is up with the touch controls hidden, inside the screen under the HUD band
+## at every smoke window size (and, for practice, its buttons on screen), else what is wrong.
+func _smoke_result_problem(what: String, buttons: bool) -> String:
+	_update_touch()
+	if not _result.visible:
+		return "result: no result panel once the %s match was over" % what
+	if _touch.visible:
+		return "result: the touch controls cover the %s result" % what
+	var view := get_viewport_rect()
+	if buttons:
+		for b: Node in _result._buttons.get_children():
+			var r := (b as Control).get_global_rect()
+			if not view.encloses(r):
+				return "result: the %s button %s at %s is off the %s screen" % [what, (b as Button).text, r, view.size]
+	for window: Vector2 in SceneSmoke.VIEW_WINDOWS:
+		var size := SceneSmoke.logical_size(window)
+		var panel := _result.panel_rect(size)
+		if not Rect2(Vector2(0, 90), size - Vector2(0, 90)).encloses(panel):
+			return "result: the %s panel %s isn't inside %s under the HUD band" % [what, panel, size]
+	return ""
+
+
+## A room of 15 on four teams with no server behind it, on the big level, playing (frame 0), for
+## the smoke test to draw.
+func _smoke_room(watching: bool) -> void:
+	var n := 15
+	var s := RoomSession.new("SMOKE", true, 10, "Smoke", "shahn", false)
+	s.my_id = 1
+	s.host_id = 1
+	s.team_count = 4
+	var teams := PackedInt32Array()
+	var ids: Array = ArtLibrary.fighters().map(func(f: Dictionary) -> String: return str(f["id"]))
+	for i in n:
+		teams.append(1 + i * 4 / n)
+		s.fighter_names.append("P%d" % (i + 1))
+		s.fighter_characters.append(str(ids[i % ids.size()]) if not ids.is_empty() else "shahn")
+		s.fighter_cpu.append(i > 0)
+		s.fighter_ids.append(i + 1)
+	s.fighter_teams = teams
+	s.rules = MatchRules.room(StageDefinition.by_id("rooftops", StageDefinition.size_for(n)), 10, PackedInt32Array(), teams)
+	s.state = Simulation.create_initial_state(s.rules, n, SceneSmoke.SEED)
+	s.main_weapons.resize(n)
+	s.my_fighter = -1 if watching else 0
+	s.frames_left = s.rules.time_limit_frames
+	s.phase = RoomSession.Phase.PLAYING
+	_room_session = s
+	_mode = Mode.ROOM
+	_refresh()
+	_update_touch()
+
+
+## One press of Android's back, as the smoke test makes it (the once-a-frame guard reset first).
+func _smoke_back() -> void:
+	_back_frame = -1
+	_on_back()
+
+
+## Back in a room's match (rooms v1, fix 4): the panel opens and the room stays; back again closes it.
+func _smoke_back_in_match() -> String:
+	_close_panel()
+	_smoke_back()
+	if _mode != Mode.ROOM or _room_session == null:
+		return "back: a press in a room's match left the room"
+	if not _panel_open():
+		return "back: a press in a room's match didn't open the match panel"
+	_smoke_back()
+	if _panel_open() or _mode != Mode.ROOM:
+		return "back: a second press didn't just close the match panel"
+	_go_to_menu()
+	return ""
+
+
+## Back on every screen that used to quit the game (fix 3): each closes and the game stays; the bare
+## menu asks "Quit?" and a second press only takes the question away.
+func _smoke_back_problem() -> String:
+	if _mode != Mode.MENU or not _menu.visible:
+		return "back: not on the menu to start with"
+	var screens: Array = [
+		["Settings", func() -> void: _settings_screen.open(), func() -> bool: return _settings_screen.visible],
+		["the fighter circle", func() -> void: _circle.open(GameSettings.character), func() -> bool: return _circle.visible],
+		["the arena slider", _open_practice_picker, func() -> bool: return _arena_picker.visible],
+	]
+	for s: Array in screens:
+		(s[1] as Callable).call()
+		if not (s[2] as Callable).call():
+			return "back: %s didn't open" % s[0]
+		_smoke_back()
+		if (s[2] as Callable).call():
+			return "back: a press didn't close %s" % s[0]
+		if _mode != Mode.MENU or not _menu.visible or _menu.quit_asked():
+			return "back: closing %s did more than close it" % s[0]
+	# The creator goes back to the circle, then the circle closes.
+	_creator.open(GameSettings.character)
+	_smoke_back()
+	if _creator.visible or not _circle.visible:
+		return "back: the creator didn't go back to the fighter circle"
+	_smoke_back()
+	if _circle.visible:
+		return "back: the circle (after the creator) didn't close"
+	if UiTheme.can_quit():
+		_smoke_back()
+		if not _menu.quit_asked():
+			return "back: the bare menu didn't ask \"Quit?\""
+		_smoke_back()
+		if _menu.quit_asked() or not _menu.visible:
+			return "back: a second press on \"Quit?\" didn't just take the question away"
+	return ""
+
+
+## A lobby of 15 in four teams (host, no server behind it), shown by the scene; and the same lobby,
+## in teams and as a free-for-all, laid out at every smoke window's logical size.
+var _smoke_lobbies: Array = [] # [[holder, RoomScreen, size, what]]
+
+
+func _smoke_lobby_session(teams: int) -> RoomSession:
+	# The widest code the alphabet makes, so the lobby check sees the top bar at its tightest.
+	var s := RoomSession.new("MWMWM", true, 10, "Smoke", "shahn", false)
+	s.my_id = 1
+	s.host_id = 1
+	s.team_count = teams
+	s.phase = RoomSession.Phase.LOBBY
+	var ids: Array = ArtLibrary.fighters().map(func(f: Dictionary) -> String: return str(f["id"]))
+	for i in 15:
+		s.players.append({"id": i + 1, "name": "Player%d" % (i + 1) if i < 4 else "CPU %d" % (i + 1), "cpu": i >= 4,
+			"character": str(ids[i % ids.size()]) if not ids.is_empty() else "shahn",
+			"team": 1 + i % 4 if teams > 0 else 0, "left": false})
+	return s
+
+
+func _smoke_lobby() -> void:
+	_room_session = _smoke_lobby_session(4)
+	_mode = Mode.ROOM
+	_room = "SMOKE"
+	_menu.hide()
+	_refresh()
+	var layer := CanvasLayer.new()
+	layer.layer = 9
+	layer.name = "SmokeLobbies"
+	add_child(layer)
+	for window: Vector2 in SceneSmoke.VIEW_WINDOWS:
+		var size := SceneSmoke.logical_size(window)
+		for teams: int in [4, 0]:
+			var holder := Control.new()
+			holder.position = Vector2.ZERO
+			holder.size = size
+			holder.visible = false
+			layer.add_child(holder)
+			var screen := RoomScreen.new()
+			holder.add_child(screen)
+			holder.visible = true
+			screen.show_lobby(_smoke_lobby_session(teams), "https://example.test/?arena=SMOKE")
+			_smoke_lobbies.append([holder, screen, size, "%s, %s" % [size, "four teams" if teams > 0 else "free-for-all"]])
+
+
+## The lobby checks: back asks "Leave the room?" (and back again takes the question away) without
+## leaving; every laid-out lobby of 15 has Leave room, Copy link and START on its screen.
+func _smoke_lobby_problem() -> String:
+	if not _room_screen.visible:
+		return "lobby: the room screen isn't showing the smoke lobby"
+	_smoke_back()
+	if _mode != Mode.ROOM or not _room_screen.visible:
+		return "back: a press in the lobby left the room"
+	if not _room_screen.leave_asked():
+		return "back: a press in the lobby didn't ask \"Leave the room?\""
+	_smoke_back()
+	if _room_screen.leave_asked() or _mode != Mode.ROOM:
+		return "back: a second press didn't just take \"Leave the room?\" away"
+	var problem := ""
+	for l: Array in _smoke_lobbies:
+		var screen: RoomScreen = l[1]
+		var screen_rect := Rect2(Vector2.ZERO, l[2] as Vector2).grow(0.5)
+		for b: Array in [["Leave room", screen.leave_button()], ["Copy link", screen.copy_button()], ["START", screen.start_button()]]:
+			var button: Button = b[1]
+			if not button.is_visible_in_tree():
+				problem = "lobby: %s isn't shown in the lobby of 15 (%s)" % [b[0], l[3]]
+			elif not screen_rect.encloses(button.get_global_rect()):
+				problem = "lobby: %s at %s is off the %s screen" % [b[0], button.get_global_rect(), l[3]]
+			if problem != "":
+				break
+		if problem != "":
+			break
+		# The room code is never cut: its type shrinks to fit between Leave room and Copy link.
+		var title := screen.title_label()
+		var font := title.get_theme_font("font")
+		var width := font.get_string_size(title.text, HORIZONTAL_ALIGNMENT_LEFT, -1, title.get_theme_font_size("font_size")).x
+		if width > title.size.x + 0.5:
+			problem = "lobby: the code %s is %.0f px wide in a %.0f px box (%s)" % [title.text, width, title.size.x, l[3]]
+			break
+	for l: Array in _smoke_lobbies:
+		(l[0] as Node).get_parent().queue_free()
+		break
+	_smoke_lobbies.clear()
+	return problem
 
 
 func _end_smoke(passed: bool, detail: String) -> void:

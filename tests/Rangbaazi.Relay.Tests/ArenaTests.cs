@@ -100,8 +100,13 @@ public sealed class ArenaTests
         Assert.Equal("taken", (await ExpectRejection(second, ArenaCloseCodes.RoomTaken)).Code);
     }
 
+    private static int Cpus(JsonElement lobby) =>
+        lobby.GetProperty("players").EnumerateArray().Count(p => p.GetProperty("cpu").GetBoolean());
+
+    /// <summary>A friend opening the host's link always gets in while a CPU holds a place (final
+    /// round): each joiner takes the last-joined CPU's place, and only fifteen people fill a room.</summary>
     [Fact]
-    public async Task A_room_holds_fifteen_and_refuses_the_sixteenth()
+    public async Task Friends_take_the_cpus_places_and_fifteen_people_refuse_the_sixteenth()
     {
         await using RelayHost host = await RelayHost.StartAsync();
         RelayClient owner = await Connect(host, "FULL", true, "Owner");
@@ -110,8 +115,28 @@ public sealed class ArenaTests
         JsonElement lobby = await NextJson(owner, "lobby");
         Assert.Equal(15, lobby.GetProperty("players").GetArrayLength());
 
+        var people = new List<RelayClient> { owner };
+        for (int i = 1; i < 15; i++)
+        {
+            RelayClient friend = await Connect(host, "FULL", false, "Friend" + i);
+            JsonElement seen = await NextJson(friend, "lobby");
+            Assert.Equal(15, seen.GetProperty("players").GetArrayLength());
+            Assert.Equal(14 - i, Cpus(seen));
+            people.Add(friend);
+        }
+
         RelayClient late = await Connect(host, "FULL", false, "Late");
         Assert.Equal("full", (await ExpectRejection(late, RelayCloseCodes.RoomFull)).Code);
+
+        // One friend leaves the lobby: a CPU takes the place back (the slider's 14 is "up to").
+        await people[^1].Socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", CancellationToken.None);
+        for (int n = 0; n < 60; n++)
+        {
+            lobby = await NextJson(owner, "lobby");
+            if (Cpus(lobby) == 1) break;
+        }
+        Assert.Equal(1, Cpus(lobby));
+        Assert.Equal(15, lobby.GetProperty("players").GetArrayLength());
     }
 
     [Fact]
@@ -268,37 +293,184 @@ public sealed class ArenaTests
         Assert.Equal(bytes, ArenaBinary.EncodeState(state, rules)); // the shield isn't in the frame
     }
 
+    /// <summary>One slot of a fighter's match record, added to their total.</summary>
+    private static void Record(GameState state, int fighter, int slot, WeaponId weapon, int damage, int kos, int sweets)
+    {
+        int from = fighter * Weapons.RecordInts, at = from + slot * Weapons.RecordSlotInts;
+        state.WeaponStats[at] = (int)weapon + 1;
+        state.WeaponStats[at + 1] = damage;
+        state.WeaponStats[at + 2] = kos;
+        state.WeaponStats[at + 3] = sweets;
+        state.WeaponStats[from + Weapons.RecordSlots * Weapons.RecordSlotInts] += damage;
+    }
+
+    /// <summary>
+    /// The state behind <see cref="SharedFrame"/>: two fighters and five props, with a value in
+    /// every field protocol 5 added. client/tests/test_protocol.gd decodes the same bytes.
+    /// </summary>
+    private static GameState SharedState(MatchRules rules)
+    {
+        GameState state = Simulation.CreateInitialState(rules, 2, 1);
+        state.Frame = 1234;
+        ref Fighter a = ref state.Fighters[0];
+        a.Position = new FixVec2(Fix.FromRatio(3, 2), Fix.Zero);
+        a.Facing = 1;
+        a.Grounded = true;
+        Record(state, 0, 0, WeaponId.Bow, 40, 1, 3); // a bow master
+        ref Fighter b = ref state.Fighters[1];
+        b.Position = new FixVec2(Fix.FromRatio(-13, 4), Fix.FromInt(2));
+        b.Facing = -1;
+        b.Action = FighterAction.Stunned;
+        b.HitstunFrames = 20;
+        b.Josh = 87;
+        b.Weapon = WeaponId.Katana;       // an id above 15, which used to mean "all-rounder"
+        b.WeaponSupply = 7;
+        b.LastHitWeapon = WeaponId.FreezeRay;
+        b.LastHitSweet = true;
+        b.HitCount = 3;
+        b.SlowFrames = 10;
+        b.DotFrames = 5;
+        b.DotBy = 1;
+        b.DotWeapon = (int)WeaponId.VenomDartLauncher;
+        b.MarkFrames = 9;
+        b.StunWeapon = (int)WeaponId.FreezeRay;
+        state.Props[0] = new Prop { Kind = PropKind.Box, Weapon = WeaponId.Matka, Supply = 3, Owner = -1, Position = new FixVec2(Fix.FromInt(2), Fix.Zero), Grounded = true, Timer = 300, IgnoreFighter = 2, IgnoreTimer = 40 };
+        state.Props[8] = new Prop { Kind = PropKind.Shot, Shot = ShotKind.Zone, Weapon = WeaponId.Lota, Owner = 1, Position = new FixVec2(Fix.FromInt(-4), Fix.Zero), Grounded = true, Timer = 300 };
+        state.Props[9] = new Prop { Kind = PropKind.Shot, Shot = ShotKind.Arrow, Weapon = WeaponId.Bow, Owner = 0, Position = new FixVec2(Fix.FromInt(3), Fix.One), Velocity = new FixVec2(-Fix.Half, Fix.Zero) };
+        state.Props[10] = new Prop { Kind = PropKind.Shot, Shot = ShotKind.Speaker, Weapon = WeaponId.SonicSpeaker, Owner = 1, Supply = -1, Position = new FixVec2(Fix.FromInt(6), Fix.Zero), Grounded = true, Timer = 600, IgnoreFighter = 1 };
+        state.Props[11] = new Prop { Kind = PropKind.PendingBox, Weapon = WeaponId.Uzi }; // not on the stage yet: not sent
+        state.Props[12] = new Prop { Kind = PropKind.Shot, Shot = ShotKind.Wall, Weapon = WeaponId.Matka, Owner = 0, Position = new FixVec2(Fix.FromInt(-8), Fix.Zero), Grounded = true, Timer = 240, IgnoreFighter = 2 };
+        return state;
+    }
+
+    /// <summary>The STATE frame of <see cref="SharedState"/>, as hex. The same string is in client/tests/test_protocol.gd.</summary>
+    private const string SharedFrame = "02D2040000CE87000000FF020080010000000000010000010000000000000000000000000000000000008700000000C0FCFF00000200FF04000000005700000000000000000014003407CE037F0D494E050120000000020000000000002C01FF0300041B0C0000FCFF00000000002C010100000407040000030000000100FF0000000000045E0E000006000000000000580201FF0104200D0000F8FF0000000000F000000002";
+
     [Fact]
-    public void State_frames_carry_weapons_and_props()
+    public void State_frames_have_the_protocol_5_layout()
+    {
+        Assert.Equal(5, ArenaLimits.ProtocolVersion);
+        Assert.Equal((34, 17), (ArenaBinary.FighterBytes, ArenaBinary.PropBytes));
+        MatchRules rules = MatchRules.Room(Stages.Rooftops, 10);
+        byte[] bytes = ArenaBinary.EncodeState(SharedState(rules), rules);
+        Assert.Equal(ArenaBinary.HeaderBytes + 2 * ArenaBinary.FighterBytes + 1 + 5 * ArenaBinary.PropBytes, bytes.Length);
+        string hex = Convert.ToHexString(bytes);
+        Assert.True(SharedFrame == hex, "the frame changed; if the layout is meant to, bump the protocol version and put this in SharedFrame and in client/tests/test_protocol.gd: " + hex);
+
+        // Fighter 0: a bow master. Fighter 1: armed with a weapon above 15, no damage dealt.
+        int o = ArenaBinary.HeaderBytes;
+        Assert.Equal((byte)WeaponId.Bow | ArenaBinary.MasterBit, bytes[o + 30]);
+        Assert.Equal((0, 0, 0), (bytes[o + 31], bytes[o + 32], bytes[o + 33]));
+        o += ArenaBinary.FighterBytes;
+        Assert.Equal((byte)WeaponId.Katana, bytes[o + 26]);
+        Assert.Equal(7, bytes[o + 27]);
+        Assert.Equal((byte)WeaponId.FreezeRay | 128, bytes[o + 28]); // the last hit: a sweet spot
+        Assert.Equal(3, bytes[o + 29]);
+        Assert.Equal(ArenaBinary.AllRounder, bytes[o + 30]);          // 127, not the old 15
+        Assert.Equal(ArenaBinary.StatusSlowed | ArenaBinary.StatusDot | ArenaBinary.StatusMarked, bytes[o + 31]);
+        Assert.Equal((byte)WeaponId.VenomDartLauncher, bytes[o + 32]);
+        Assert.Equal((byte)WeaponId.FreezeRay, bytes[o + 33]);
+
+        // The props in use, in slot order: a box, a zone, an arrow, a speaker, a wall. The pending box is not sent.
+        o += ArenaBinary.FighterBytes;
+        Assert.Equal(5, bytes[o]);
+        o++;
+        (PropKind Kind, WeaponId Weapon, ShotKind Shot, int X, int Facing, int Timer, int Owner, int Supply, int Wear)[] props =
+        {
+            (PropKind.Box, WeaponId.Matka, ShotKind.None, 2, 0, 300, 255, 3, 0),       // who dropped a box is not wear
+            (PropKind.Shot, WeaponId.Lota, ShotKind.Zone, -4, 0, 300, 1, 0, 0),         // a timer past 255
+            (PropKind.Shot, WeaponId.Bow, ShotKind.Arrow, 3, -1, 0, 0, 0, 0),
+            (PropKind.Shot, WeaponId.SonicSpeaker, ShotKind.Speaker, 6, 0, 600, 1, -1, 1), // a facing as its supply
+            (PropKind.Shot, WeaponId.Matka, ShotKind.Wall, -8, 0, 240, 0, 0, 2),        // two swings taken
+        };
+        foreach (var p in props)
+        {
+            Assert.Equal(((byte)p.Kind, (byte)p.Weapon, (byte)p.Shot), (bytes[o], bytes[o + 1], bytes[o + 2]));
+            Assert.Equal(Fix.FromInt(p.X).Raw, BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(o + 3)));
+            Assert.Equal(p.Facing, (sbyte)bytes[o + 11]);
+            Assert.Equal(p.Timer, BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(o + 12)));
+            Assert.Equal(p.Owner, bytes[o + 14]);
+            Assert.Equal(p.Supply, (sbyte)bytes[o + 15]);
+            Assert.Equal(p.Wear, bytes[o + 16]);
+            o += ArenaBinary.PropBytes;
+        }
+        Assert.Equal(bytes.Length, o);
+    }
+
+    [Fact]
+    public void Each_status_has_its_own_bit_and_a_main_weapon_is_its_id()
     {
         MatchRules rules = MatchRules.Room(Stages.Rooftops, 10);
-        GameState state = Simulation.CreateInitialState(rules, 2, 1);
-        state.Fighters[1].Weapon = WeaponId.Bow;
-        state.Fighters[1].WeaponSupply = 5;
-        state.Fighters[1].LastHitWeapon = WeaponId.Uzi;
-        state.Fighters[1].LastHitSweet = true;
-        state.Fighters[1].HitCount = 3;
-        int bow = (int)WeaponId.Bow * 3; // fighter 0's record with the bow: damage, a KO, 3 sweet spots
-        state.WeaponStats[bow] = 40;
-        state.WeaponStats[bow + 1] = 1;
-        state.WeaponStats[bow + 2] = 3;
-        state.Props[4] = new Prop { Kind = PropKind.Shot, Shot = ShotKind.Arrow, Weapon = WeaponId.Bow, Position = new FixVec2(Fix.FromInt(3), Fix.One), Velocity = new FixVec2(-Fix.Half, Fix.Zero) };
-        state.Props[9] = new Prop { Kind = PropKind.PendingBox, Weapon = WeaponId.Uzi }; // not on the stage yet: not sent
+        int status = ArenaBinary.HeaderBytes + 31;
+        (Action<GameState> Set, int Bit)[] cases =
+        {
+            (s => s.Fighters[0].SlowFrames = 1, ArenaBinary.StatusSlowed),
+            (s => s.Fighters[0].RootFrames = 400, ArenaBinary.StatusRooted),
+            (s => s.Fighters[0].DotFrames = 30, ArenaBinary.StatusDot),
+            (s => s.Fighters[0].MarkFrames = 300, ArenaBinary.StatusMarked),
+            (s => s.Fighters[0].StunImmune = 150, ArenaBinary.StatusStunImmune),
+            (s =>
+            {
+                // In a stink cloud: hidden (batch 4).
+                s.Props[^1] = new Prop
+                {
+                    Kind = PropKind.Shot, Shot = ShotKind.Zone, Weapon = WeaponId.StinkCloudCapsule, Owner = 1,
+                    Position = s.Fighters[0].Position, Timer = 300,
+                };
+            }, ArenaBinary.StatusHidden),
+            (s =>
+            {
+                // A guard up: the Parat on its third frame (batch 4).
+                ref Fighter f = ref s.Fighters[0];
+                f.Weapon = WeaponId.Parat;
+                f.WeaponSupply = 8;
+                f.Action = FighterAction.Attack;
+                f.Move = Weapons.Get(WeaponId.Parat).Move;
+                f.ActionFrame = 3;
+            }, ArenaBinary.StatusGuarding),
+        };
+        Assert.Equal(new[] { 1, 2, 4, 8, 16, 32, 64 }, cases.Select(c => c.Bit));
+        int all = 0;
+        GameState every = Simulation.CreateInitialState(rules, 2, 1);
+        foreach (var c in cases)
+        {
+            GameState s = Simulation.CreateInitialState(rules, 2, 1);
+            Assert.Equal(0, ArenaBinary.EncodeState(s, rules)[status]);
+            c.Set(s);
+            Assert.Equal(c.Bit, ArenaBinary.EncodeState(s, rules)[status]);
+            Assert.Equal(0, ArenaBinary.EncodeState(s, rules)[status + ArenaBinary.FighterBytes]); // the other fighter's are its own
+            c.Set(every);
+            all |= c.Bit;
+        }
+        Assert.Equal(all, ArenaBinary.EncodeState(every, rules)[status]);
+
+        // The main weapon: fists are 0, any weapon is its id (a hundred of them now), an all-rounder is 127.
+        int main = ArenaBinary.HeaderBytes + 30;
+        GameState m = Simulation.CreateInitialState(rules, 2, 1);
+        Assert.Equal(127, ArenaBinary.EncodeState(m, rules)[main]);
+        Record(m, 0, 0, WeaponId.None, 30, 0, 0);
+        Assert.Equal(0, ArenaBinary.EncodeState(m, rules)[main]);
+        Record(m, 0, 1, WeaponId.Plank, 60, 0, 0); // id 15: the number that used to mean "all-rounder"
+        Assert.Equal(15, ArenaBinary.EncodeState(m, rules)[main]);
+        Record(m, 0, 2, WeaponId.RubberChickenLauncher, 200, 2, 5);
+        Assert.Equal(100 | 128, ArenaBinary.EncodeState(m, rules)[main]);
+        Record(m, 0, 3, WeaponId.Bow, 200, 0, 0);
+        Record(m, 0, 4, WeaponId.Uzi, 200, 0, 0); // now nothing is 40% of the total
+        Assert.Equal(127, ArenaBinary.EncodeState(m, rules)[main]);
+    }
+
+    [Fact]
+    public void A_full_room_frame_fits_the_size_the_spec_gives()
+    {
+        MatchRules rules = MatchRules.Room(Stages.Rooftops, 10);
+        GameState state = Simulation.CreateInitialState(rules, 15, 1);
+        Assert.Equal(64, state.Props.Length);
+        for (int i = 0; i < state.Props.Length; i++)
+            state.Props[i] = new Prop { Kind = PropKind.Shot, Shot = ShotKind.Mine, Weapon = WeaponId.Mines, Owner = i % 15, Timer = 900 };
         byte[] bytes = ArenaBinary.EncodeState(state, rules);
-        int o = ArenaBinary.HeaderBytes + ArenaBinary.FighterBytes;
-        Assert.Equal((byte)WeaponId.Bow, bytes[o + 26]);
-        Assert.Equal(5, bytes[o + 27]);
-        Assert.Equal((byte)WeaponId.Uzi | 128, bytes[o + 28]); // the last hit: an Uzi sweet spot
-        Assert.Equal(3, bytes[o + 29]);
-        Assert.Equal(15, bytes[o + 30]);                        // no damage dealt yet: an all-rounder
-        Assert.Equal((byte)WeaponId.Bow | 128, bytes[ArenaBinary.HeaderBytes + 30]); // fighter 0: a bow master
-        o = ArenaBinary.HeaderBytes + 2 * ArenaBinary.FighterBytes;
-        Assert.Equal(1, bytes[o]);
-        Assert.Equal(o + 1 + ArenaBinary.PropBytes, bytes.Length);
-        Assert.Equal((byte)PropKind.Shot, bytes[o + 1]);
-        Assert.Equal((byte)ShotKind.Arrow, bytes[o + 3]);
-        Assert.Equal(Fix.FromInt(3).Raw, BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(o + 4)));
-        Assert.Equal(-1, (sbyte)bytes[o + 12]);
+        Assert.Equal(12 + 15 * 34 + 1 + 64 * 17, bytes.Length);
+        Assert.Equal(64, bytes[12 + 15 * 34]);
+        Assert.True(bytes.Length <= 12 + 16 * 34 + 1 + 64 * 17); // 1,645: the largest frame a 16-fighter match could send
     }
 
     [Fact]

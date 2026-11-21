@@ -26,7 +26,10 @@ public enum MoveId : byte
     /// <summary>Down + Heavy in the air (GDD B2 "Ground slam"): hovers, then plunges until it lands.</summary>
     GroundSlam,
 
-    // Weapon attacks (Weapons.cs). Shared by every fighter; armed, either attack button fires them.
+    // Weapon attacks: each is the move of one row of the weapon table (WeaponRow.Move). Shared by
+    // every fighter; armed, either attack button fires them. Rows after the twelve named here have
+    // move ids with no name (7 + the weapon's id): the engine reads a weapon move through
+    // Weapons.RowOfMove, never by name.
     BelanBonk,
     BatSwing,
     ShotgunBlast,
@@ -106,6 +109,13 @@ public sealed class MoveData
 
     /// <summary>Using the move spends the fighter's recovery until they land or are hit.</summary>
     public bool UsesRecovery { get; init; }
+
+    /// <summary>
+    /// What a hit adds (<see cref="WeaponEffect"/>) and its number, from a weapon's row. None for
+    /// fist moves. Carried into the hit; nothing reads them yet (combat spec v0.4, batch 3).
+    /// </summary>
+    public int Effect { get; init; }
+    public int EffectN { get; init; }
 
     public int TotalFrames => Startup + Active + Recovery;
 

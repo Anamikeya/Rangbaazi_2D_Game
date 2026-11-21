@@ -12,7 +12,10 @@ func test_mix_id_round_trips() -> void:
 	check_eq(ArtLibrary.look(id), "rajat", "a mix looks like its head")
 	check_eq(ArtLibrary.look("shahn"), "shahn", "a fighter looks like itself")
 	check_eq(ArtLibrary.fighter_name(id), "Rocky7", "its name")
-	check_eq(ArtLibrary.fighter_name(ArtLibrary.make_mix("rajat", "rajat", "rajat", "rajat", "")), "Custom", "no name")
+	# No name: called after its head's fighter (rooms v1, fix 25), never "Custom"; display names, not ids.
+	check_eq(ArtLibrary.fighter_name(ArtLibrary.make_mix("rajat", "rajat", "rajat", "rajat", "")),
+		ArtLibrary.fighter_name("rajat") + CharacterCreator.NAME_SUFFIX, "no name")
+	check_eq(ArtLibrary.fighter_name(ArtLibrary.make_mix("akmal", "shahn", "shahn", "shahn", "")), "Simran Jr", "named by the head's display name")
 
 
 func test_bad_mix_ids_are_rejected() -> void:

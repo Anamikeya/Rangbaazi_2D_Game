@@ -124,16 +124,17 @@ public class WeaponTests
         var rules = new MatchRules { Stage = TestStages.Wide, Weapons = true };
         var s = Simulation.CreateInitialState(rules, 2, 3);
         var seen = new List<WeaponId>();
-        for (int f = 0; f < 60 * 180; f++)
+        var inputs = new Buttons[2];
+        for (int f = 0; f < 60 * 6000 && (seen.Count <= 10 || seen.Distinct().Count() < Weapons.CrateList.Length); f++)
         {
             WeaponId last = s.LastBoxWeapon;
-            Simulation.Advance(s, rules, new Buttons[2]);
+            Simulation.Advance(s, rules, inputs);
             if (s.LastBoxWeapon != last) seen.Add(s.LastBoxWeapon);
             for (int i = 0; i < s.Props.Length; i++) s.Props[i] = default; // keep under the cap
         }
         Assert.True(seen.Count > 10);
         for (int i = 1; i < seen.Count; i++) Assert.NotEqual(seen[i - 1], seen[i]);
-        Assert.Equal(Weapons.Count - 1, seen.Distinct().Count()); // every weapon turns up
+        Assert.Equal(Weapons.CrateList.Length, seen.Distinct().Count()); // every weapon a crate can hold turns up
     }
 
     [Fact]
@@ -269,13 +270,13 @@ public class WeaponTests
         Arm(s, 0, WeaponId.BowlingBall);
         Step(s, Buttons.Light);
         Assert.Equal(WeaponId.BowlingBall, s.Fighters[0].Weapon);
-        Wait(s, Weapons.BallRoll.Startup);
+        Wait(s, Weapons.Get(WeaponId.BowlingBall).MoveData.Startup);
         Assert.Equal(WeaponId.None, s.Fighters[0].Weapon); // it left the hand
         Assert.Equal(1, Count(s, PropKind.Shot, ShotKind.Roll));
         Wait(s, 40);
         Assert.Equal(14, s.Fighters[1].Josh);
         Assert.Equal(14 * Weapons.SweetPercent / 100, s.Fighters[2].Josh); // "Strike!": the second pin is a sweet spot
-        Wait(s, Weapons.RollFrames);
+        Wait(s, Weapons.Get(WeaponId.BowlingBall).Life);
         Assert.Equal(1, Count(s, PropKind.Item));
         Assert.Equal(WeaponId.BowlingBall, s.Props.First(p => p.Kind == PropKind.Item).Weapon);
     }
@@ -291,7 +292,7 @@ public class WeaponTests
         Wait(near, 12);
         Wait(far, 12);
         Assert.Equal(18 * Weapons.SweetPercent / 100, near.Fighters[1].Josh);
-        Assert.Equal(Weapons.ShotgunFarDamage, far.Fighters[1].Josh);
+        Assert.Equal(Weapons.Get(WeaponId.Shotgun).FarDamage, far.Fighters[1].Josh);
         Assert.True(far.Fighters[0].Velocity.X < Fix.Zero, "the blast pushes the shooter back");
         Assert.Equal(3, near.Fighters[0].WeaponSupply);
     }
@@ -344,8 +345,8 @@ public class WeaponTests
         Arm(busy, 0, WeaponId.Belan);
         Step(calm, Buttons.Light);
         Step(busy, Buttons.Light, Buttons.Heavy); // P2 starts a slow heavy at the same moment
-        Wait(calm, Weapons.BelanBonk.Startup);
-        Wait(busy, Weapons.BelanBonk.Startup);
+        Wait(calm, Weapons.Get(WeaponId.Belan).MoveData.Startup);
+        Wait(busy, Weapons.Get(WeaponId.Belan).MoveData.Startup);
         Assert.Equal(8, calm.Fighters[1].Josh);
         Assert.Equal(8 + 1 + 10, calm.Fighters[1].HitstunFrames + 0); // 8 + Josh/8 + the dizzy bonus
         Assert.Equal(8 * Weapons.SweetPercent / 100, busy.Fighters[1].Josh);
@@ -361,8 +362,8 @@ public class WeaponTests
         Arm(body, 0, WeaponId.BaseballBat);
         Step(tip, Buttons.Light);
         Step(body, Buttons.Light);
-        Wait(tip, Weapons.BatSwing.Startup);
-        Wait(body, Weapons.BatSwing.Startup);
+        Wait(tip, Weapons.Get(WeaponId.BaseballBat).MoveData.Startup);
+        Wait(body, Weapons.Get(WeaponId.BaseballBat).MoveData.Startup);
         Assert.Equal(16 * Weapons.SweetPercent / 100, tip.Fighters[1].Josh);
         Assert.Equal(16, body.Fighters[1].Josh);
         Fighter t = tip.Fighters[1], b = body.Fighters[1];
@@ -432,7 +433,7 @@ public class WeaponTests
         Arm(b, 0, WeaponId.BaseballBat);
         Step(a, own, Buttons.Light);
         Step(b, other, Buttons.Light);
-        for (int i = 0; i < Weapons.BatSwing.Startup; i++)
+        for (int i = 0; i < Weapons.Get(WeaponId.BaseballBat).MoveData.Startup; i++)
         {
             Step(a, own);
             Step(b, other);
@@ -479,7 +480,7 @@ public class WeaponTests
         s.Props[0] = new Prop
         {
             Kind = PropKind.Shot, Shot = ShotKind.Boomerang, Weapon = WeaponId.Boomerang, Owner = 0, OwnerClear = true,
-            Position = new FixVec2(Cm(420), Cm(70)), Velocity = new FixVec2(-Weapons.BoomerangSpeed, Fix.Zero), Timer = 1, Supply = 2,
+            Position = new FixVec2(Cm(420), Cm(70)), Velocity = new FixVec2(-Weapons.Get(WeaponId.Boomerang).Vx, Fix.Zero), Timer = 1, Supply = 2,
         };
         Wait(s, 4);
         Assert.Equal(8 * Weapons.SweetPercent / 100, s.Fighters[1].Josh);
@@ -494,7 +495,7 @@ public class WeaponTests
         s.Props[0] = new Prop
         {
             Kind = PropKind.Shot, Shot = ShotKind.Boomerang, Weapon = WeaponId.Boomerang, Owner = 0, OwnerClear = true,
-            Position = new FixVec2(Cm(6000), Cm(70)), Timer = 1, Supply = 2, Age = Weapons.BoomerangFrames - 1,
+            Position = new FixVec2(Cm(6000), Cm(70)), Timer = 1, Supply = 2, Age = Weapons.Get(WeaponId.Boomerang).Life - 1,
         };
         s.Props[1] = s.Props[0] with { Supply = 0, Position = new FixVec2(Cm(7000), Cm(70)) };
         Wait(s, 2);
@@ -518,11 +519,11 @@ public class WeaponTests
         int pad = Array.FindIndex(s.Props, p => p.Shot == ShotKind.Pad);
         s.Fighters[1].Position = new FixVec2(s.Props[pad].Position.X, Fix.Zero);
         Step(s);
-        Assert.Equal(Weapons.PadLaunch, s.Fighters[1].Velocity.Y);
+        Assert.Equal(Weapons.Get(WeaponId.Trampoline).PadLaunch, s.Fighters[1].Velocity.Y);
         Assert.False(s.Fighters[1].Grounded);
         Assert.Equal(0, s.Fighters[1].Josh); // it never hurts
 
-        Wait(s, Weapons.PadFrames);
+        Wait(s, Weapons.Get(WeaponId.Trampoline).Fuse);
         Assert.Equal(0, Count(s, PropKind.Shot, ShotKind.Pad)); // gone after 10 s
     }
 
@@ -533,9 +534,9 @@ public class WeaponTests
         s.Props[0] = new Prop
         {
             Kind = PropKind.Shot, Shot = ShotKind.Mine, Weapon = WeaponId.Mines, Owner = 0, OwnerClear = true,
-            Position = new FixVec2(Cm(600), Fix.Zero), Grounded = true, Timer = Weapons.MineArmFrames,
+            Position = new FixVec2(Cm(600), Fix.Zero), Grounded = true, Timer = Weapons.Get(WeaponId.Mines).Fuse,
         };
-        Wait(s, Weapons.MineArmFrames - 2);
+        Wait(s, Weapons.Get(WeaponId.Mines).Fuse - 2);
         Assert.Equal(0, s.Fighters[1].Josh); // not armed yet
         Wait(s, 3);
         Assert.Equal(16 * Weapons.SweetPercent / 100, s.Fighters[1].Josh); // stepping on it is a direct hit
@@ -562,7 +563,7 @@ public class WeaponTests
         s.Props[0] = new Prop
         {
             Kind = PropKind.Shot, Shot = ShotKind.Mine, Weapon = WeaponId.Mines, Owner = 0, OwnerClear = true,
-            Position = new FixVec2(Cm(260), Fix.Zero), Grounded = true, Age = Weapons.MineFrames - 2,
+            Position = new FixVec2(Cm(260), Fix.Zero), Grounded = true, Age = Weapons.Get(WeaponId.Mines).Life - 2,
         };
         Step(s);
         Assert.Equal(1, Count(s, PropKind.Shot, ShotKind.Mine));
@@ -578,7 +579,7 @@ public class WeaponTests
         GameState s = Standing(0);
         Arm(s, 0, WeaponId.Mines);
         Step(s, Buttons.Light);
-        Wait(s, Weapons.MineArmFrames + 60);
+        Wait(s, Weapons.Get(WeaponId.Mines).Fuse + 60);
         Assert.Equal(1, Count(s, PropKind.Shot, ShotKind.Mine));
         Assert.Equal(0, s.Fighters[0].Josh);
         Assert.Equal(2, s.Fighters[0].WeaponSupply);
@@ -605,7 +606,7 @@ public class WeaponTests
         Step(s, Buttons.Light);
         Wait(s, 100);
         Assert.Equal(1, Count(s, PropKind.Shot, ShotKind.Missile));
-        Wait(s, Weapons.MissileFrames);
+        Wait(s, Weapons.Get(WeaponId.HomingMissile).Life);
         Assert.Equal(0, Count(s, PropKind.Shot));
         Assert.Equal(0, s.Fighters[0].Josh);
     }
@@ -617,15 +618,15 @@ public class WeaponTests
         s.Props[0] = new Prop
         {
             Kind = PropKind.Shot, Shot = ShotKind.Hole, Weapon = WeaponId.BlackHoleBomb, Owner = 0, OwnerClear = true,
-            Position = FixVec2.Zero, Grounded = true, Timer = Weapons.HoleFuse,
+            Position = FixVec2.Zero, Grounded = true, Timer = Weapons.Get(WeaponId.BlackHoleBomb).Fuse,
         };
-        Wait(s, Weapons.HoleFuse - Weapons.HolePullFrames - 2);
+        Wait(s, Weapons.Get(WeaponId.BlackHoleBomb).Fuse - Weapons.Get(WeaponId.BlackHoleBomb).PullFrames - 2);
         Assert.Equal(Cm(300), s.Fighters[1].Position.X); // not pulling yet
         Wait(s, 32);
         Assert.True(Fix.Abs(s.Fighters[1].Position.X) < Cm(100), "pulled in from the right");
         Assert.True(Fix.Abs(s.Fighters[2].Position.X) < Cm(100), "pulled in from the left");
         Assert.Equal(0, s.Fighters[1].Josh);
-        Wait(s, Weapons.HolePullFrames);
+        Wait(s, Weapons.Get(WeaponId.BlackHoleBomb).PullFrames);
         Assert.Equal(20, s.Fighters[1].Josh);
         Assert.Equal(20, s.Fighters[2].Josh);
         Assert.Equal(0, s.Fighters[0].Josh); // 30 m away
@@ -688,8 +689,10 @@ public class WeaponTests
         // Four bots on a room arena with weapons, with an 8-frame misprediction every 7 frames.
         var rules = MatchRules.Room(Stages.Rooftops, 1, new[] { WeaponId.Uzi, WeaponId.Bow, WeaponId.None, WeaponId.BaseballBat });
         const int frames = 60 * 40;
-        var reference = Simulation.CreateInitialState(rules, 4, 77);
-        var live = Simulation.CreateInitialState(rules, 4, 77);
+        // The seed picks the crates: with 68 weapons in them, this one hands the bots guns and bombs
+        // (seed 77, the old one, now gives them only swings). Pick another if the crates change.
+        var reference = Simulation.CreateInitialState(rules, 4, 81);
+        var live = Simulation.CreateInitialState(rules, 4, 81);
         var levels = new[] { CpuLevel.Hard, CpuLevel.Normal, CpuLevel.Hard, CpuLevel.Easy };
         Buttons[] Think(GameState g) => Enumerable.Range(0, 4).Select(p => SparringBot.Think(g, rules, p, levels[p])).ToArray();
         int armed = 0, shots = 0;

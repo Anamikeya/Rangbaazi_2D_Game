@@ -36,13 +36,23 @@ var last_hit_timer := 0  # frames left in which a ring-out still credits last_hi
 var shield := 0          # hidden second wind: damage absorbed before Josh rises (never shown)
 var weapon := 0          # the weapon in hand (Weapons), kept when hit
 var weapon_supply := 0   # its ammo or durability
-var uzi_shots := 0       # Uzi bullets fired in this burst (the spread pattern)
-var uzi_streak := 0      # Uzi hits in a row on one target
-var uzi_target := 0      # 1 + the fighter the streak is on, or 0
+var burst_shots := 0     # shots fired in this hold of a repeating weapon (its spread pattern)
+var streak := 0          # hits in a row on one target, for a weapon whose sweet spot is a streak
+var streak_target := 0   # 1 + the fighter the streak is on, or 0
 var flurry_next: int = MoveData.Id.NONE # the second hit of a fist flurry, queued; or NONE
 var last_hit_weapon := 0 # the weapon the last hit taken came from (0: fists or a hazard)
 var last_hit_sweet := false # that hit was a sweet spot
 var hit_count := 0       # goes up on every hit taken, so a renderer can tell a new hit
+# Statuses (combat spec v0.4, section 3.1). In the state and on the wire from batch 1; they stay 0
+# until batch 3 gives them behaviour. Cleared on a spawn and on a KO.
+var slow_frames := 0     # frames of slow left; also the chill that builds towards a freeze
+var root_frames := 0     # frames rooted
+var dot_frames := 0      # frames of poison or burn left
+var dot_by := 0          # 1 + the fighter credited with it, or 0
+var dot_weapon := 0      # the weapon id it is recorded under
+var mark_frames := 0     # frames marked
+var stun_immune := 0     # frames in which a stun, slip, root or freeze can't take hold
+var stun_weapon := 0     # the weapon whose hold (root, stun, slip, freeze) the fighter is in now, or 0
 
 
 func is_active() -> bool:
@@ -80,13 +90,33 @@ func copy_from(o: Fighter) -> void:
 	shield = o.shield
 	weapon = o.weapon
 	weapon_supply = o.weapon_supply
-	uzi_shots = o.uzi_shots
-	uzi_streak = o.uzi_streak
-	uzi_target = o.uzi_target
+	burst_shots = o.burst_shots
+	streak = o.streak
+	streak_target = o.streak_target
 	flurry_next = o.flurry_next
 	last_hit_weapon = o.last_hit_weapon
 	last_hit_sweet = o.last_hit_sweet
 	hit_count = o.hit_count
+	slow_frames = o.slow_frames
+	root_frames = o.root_frames
+	dot_frames = o.dot_frames
+	dot_by = o.dot_by
+	dot_weapon = o.dot_weapon
+	mark_frames = o.mark_frames
+	stun_immune = o.stun_immune
+	stun_weapon = o.stun_weapon
+
+
+## Clears every status: on a spawn, and when the fighter is knocked out.
+func clear_statuses() -> void:
+	slow_frames = 0
+	root_frames = 0
+	dot_frames = 0
+	dot_by = 0
+	dot_weapon = 0
+	mark_frames = 0
+	stun_immune = 0
+	stun_weapon = 0
 
 
 func add_to(h: StateHasher) -> void:
@@ -120,10 +150,18 @@ func add_to(h: StateHasher) -> void:
 	h.add_int(shield)
 	h.add_int(weapon)
 	h.add_int(weapon_supply)
-	h.add_int(uzi_shots)
-	h.add_int(uzi_streak)
-	h.add_int(uzi_target)
+	h.add_int(burst_shots)
+	h.add_int(streak)
+	h.add_int(streak_target)
 	h.add_int(flurry_next)
 	h.add_int(last_hit_weapon)
 	h.add_bool(last_hit_sweet)
 	h.add_int(hit_count)
+	h.add_int(slow_frames)
+	h.add_int(root_frames)
+	h.add_int(dot_frames)
+	h.add_int(dot_by)
+	h.add_int(dot_weapon)
+	h.add_int(mark_frames)
+	h.add_int(stun_immune)
+	h.add_int(stun_weapon)

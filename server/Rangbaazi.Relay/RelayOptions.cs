@@ -16,6 +16,7 @@ public sealed record RelayOptions
     public const string MaxRoomsVariable = "MAX_ROOMS";
     public const string MaxConnectionsVariable = "MAX_CONNECTIONS";
     public const string WebRootVariable = "WEB_ROOT";
+    public const string ArenaMatchSecondsVariable = "ARENA_MATCH_SECONDS";
 
     /// <summary>HTTP header CloudFront adds to every origin request when <see cref="OriginSecret"/> is set.</summary>
     public const string OriginSecretHeader = "X-Origin-Secret";
@@ -35,6 +36,13 @@ public sealed record RelayOptions
 
     public int MaxConnections { get; init; } = 2000;
 
+    /// <summary>
+    /// For local end-to-end tests only: when above 0, every arena match lasts this many seconds
+    /// instead of the host's 10 to 15 minutes, so a test can watch one end. 0 (the default) in
+    /// production.
+    /// </summary>
+    public int ArenaMatchSeconds { get; init; }
+
     /// <summary>Largest message a player may send, after reassembling fragments.</summary>
     public int MaxMessageBytes { get; init; } = 256;
 
@@ -50,6 +58,13 @@ public sealed record RelayOptions
     /// <summary>A connection that sends nothing for this long is closed.</summary>
     public TimeSpan IdleTimeout { get; init; } = TimeSpan.FromSeconds(60);
 
+    /// <summary>
+    /// How long an arena room nobody is left in is kept, back in its lobby, so its host can come back
+    /// to it (a phone browser drops the connection while the player shares the link in another app).
+    /// Zero closes an empty room at once.
+    /// </summary>
+    public TimeSpan EmptyRoomGrace { get; init; } = TimeSpan.FromMinutes(3);
+
     /// <summary>How long a close handshake may take before the connection is aborted.</summary>
     public TimeSpan CloseTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
@@ -57,7 +72,7 @@ public sealed record RelayOptions
 
     public TimeSpan ShutdownTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
-    /// <summary>Reads PORT, RELAY_ORIGIN_SECRET, MAX_ROOMS and MAX_CONNECTIONS. Throws <see cref="FormatException"/> on bad values.</summary>
+    /// <summary>Reads PORT, RELAY_ORIGIN_SECRET, MAX_ROOMS, MAX_CONNECTIONS, WEB_ROOT and ARENA_MATCH_SECONDS. Throws <see cref="FormatException"/> on bad values.</summary>
     public static RelayOptions FromEnvironment(Func<string, string?> getVariable)
     {
         ArgumentNullException.ThrowIfNull(getVariable);
@@ -71,6 +86,7 @@ public sealed record RelayOptions
             WebRoot = string.IsNullOrWhiteSpace(webRoot) ? null : webRoot.Trim(),
             MaxRooms = ReadInt(getVariable, MaxRoomsVariable, defaults.MaxRooms, min: 1, max: 1_000_000),
             MaxConnections = ReadInt(getVariable, MaxConnectionsVariable, defaults.MaxConnections, min: 1, max: 1_000_000),
+            ArenaMatchSeconds = ReadInt(getVariable, ArenaMatchSecondsVariable, 0, min: 0, max: 3600),
         };
     }
 

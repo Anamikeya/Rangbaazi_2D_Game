@@ -81,6 +81,47 @@ public class DeterminismTests
     }
 
     [Fact]
+    public void A_four_team_room_of_fifteen_on_a_big_stage_is_deterministic_and_rolls_back()
+    {
+        // Rooms v1, section 6.1: 15 CPUs in four teams, on the big level a room of 15 plays.
+        int[] teams = { 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4 };
+        var rules = MatchRules.Room(Stages.ById("rooftops", StageScaling.SizeFor(15))!, 1, null, teams);
+        Assert.Equal(StageSize.Big, rules.Stage.Size);
+        const int players = 15, copyAt = 600, frames = 1500;
+        var a = Simulation.CreateInitialState(rules, players, 21);
+        var b = Simulation.CreateInitialState(rules, players, 21);
+        var inputs = new Buttons[players];
+        GameState? saved = null;
+        for (int f = 0; f < frames; f++)
+        {
+            if (f == copyAt) saved = a.Clone();
+            for (int p = 0; p < players; p++) inputs[p] = SparringBot.Think(a, rules, p, CpuLevel.Hard);
+            Simulation.Advance(a, rules, inputs);
+            Simulation.Advance(b, rules, inputs);
+            Assert.Equal(a.Checksum(), b.Checksum());
+        }
+
+        // Back to frame 600 and on again, from the copy: the same checksum at the end.
+        var c = Simulation.CreateInitialState(rules, players, 1);
+        c.CopyFrom(saved!);
+        var d = Simulation.CreateInitialState(rules, players, 21);
+        for (int f = 0; f < frames; f++)
+        {
+            if (f == copyAt) Assert.Equal(d.Checksum(), c.Checksum());
+            if (f >= copyAt)
+            {
+                for (int p = 0; p < players; p++) inputs[p] = SparringBot.Think(c, rules, p, CpuLevel.Hard);
+                Simulation.Advance(c, rules, inputs);
+            }
+            for (int p = 0; p < players; p++) inputs[p] = SparringBot.Think(d, rules, p, CpuLevel.Hard);
+            Simulation.Advance(d, rules, inputs);
+        }
+        Assert.Equal(a.Checksum(), c.Checksum());
+        Assert.Equal(a.Checksum(), d.Checksum());
+        Assert.True(a.Fighters.Sum(f => f.Kos) > 0, "the CPUs should score");
+    }
+
+    [Fact]
     public void CloneIsIndependent()
     {
         var a = Simulation.CreateInitialState(Rules, 2, 1);
@@ -168,7 +209,7 @@ public class DeterminismTests
     public void ChecksumAndCloneCoverEveryWeaponStat()
     {
         var s = Simulation.CreateInitialState(Rules, 2, 1);
-        Assert.Equal(2 * Weapons.Count * 3, s.WeaponStats.Length);
+        Assert.Equal(2 * Weapons.RecordInts, s.WeaponStats.Length);
         for (int i = 0; i < s.WeaponStats.Length; i++)
         {
             GameState copy = s.Clone();
@@ -279,5 +320,364 @@ public class DeterminismTests
             Simulation.Advance(live, rules, inputs);
             Assert.Equal(checksums[f], live.Checksum());
         }
+    }
+
+    /// <summary>
+    /// Combat spec v0.4, batch 3: a match with every status running (slow, root, poison, burn, mark,
+    /// stun immunity, a freeze) and two streams spraying is saved in the middle of a spray, advanced
+    /// 120 frames, loaded into a state that has moved on and advanced again: the checksums match
+    /// frame by frame. The same start played twice gives the same checksums too.
+    /// </summary>
+    [Fact]
+    public void RollbackWithEveryStatusAndAStreamMidSprayMatchesTheOriginalTimeline()
+    {
+        var rules = new MatchRules { Stage = Stages.Graybox, Weapons = true, Flurry = true };
+        GameState Start()
+        {
+            var s = Simulation.CreateInitialState(rules, Players, 31);
+            int[] xs = { -3, 3, -7, -1 };
+            for (int p = 0; p < Players; p++)
+            {
+                ref Fighter f = ref s.Fighters[p];
+                f.Position = new FixVec2(Fix.FromInt(xs[p]), Fix.Zero);
+                f.Velocity = FixVec2.Zero;
+                f.Grounded = true;
+                f.Facing = xs[p] < 0 ? 1 : -1;
+            }
+            s.Fighters[0].Weapon = WeaponId.Flamethrower;
+            s.Fighters[0].WeaponSupply = 24;
+            s.Fighters[1].Weapon = WeaponId.FreezeRay;
+            s.Fighters[1].WeaponSupply = 30;
+            ref Fighter rooted = ref s.Fighters[2];
+            rooted.RootFrames = 90;
+            rooted.StunWeapon = (int)WeaponId.Net;
+            rooted.StunImmune = 180;
+            rooted.SlowFrames = 60;
+            rooted.MarkFrames = 300;
+            rooted.DotFrames = 240;
+            rooted.DotBy = 2;
+            rooted.DotWeapon = (int)WeaponId.VenomDartLauncher;
+            ref Fighter frozen = ref s.Fighters[3];
+            frozen.Action = FighterAction.Stunned;
+            frozen.HitstunFrames = 60;
+            frozen.StunWeapon = (int)WeaponId.FreezeRay;
+            frozen.StunImmune = 210;
+            frozen.DotFrames = 90;
+            frozen.DotBy = 1;
+            frozen.DotWeapon = (int)WeaponId.Flamethrower;
+            return s;
+        }
+        void Fill(GameState s, Buttons[] inputs)
+        {
+            inputs[0] = Buttons.Light;
+            inputs[1] = s.Frame % 50 < 40 ? Buttons.Light : Buttons.None;
+            inputs[2] = s.Frame % 30 == 0 ? Buttons.Light | Buttons.Left : Buttons.Right;
+            inputs[3] = SparringBot.Think(s, rules, 3, CpuLevel.Hard);
+        }
+        ulong[] Run(out GameState state)
+        {
+            state = Start();
+            var sums = new ulong[300];
+            var inputs = new Buttons[Players];
+            for (int f = 0; f < sums.Length; f++)
+            {
+                Fill(state, inputs);
+                Simulation.Advance(state, rules, inputs);
+                sums[f] = state.Checksum();
+            }
+            return sums;
+        }
+        Assert.Equal(Run(out _), Run(out _));
+
+        GameState live = Start();
+        var buttons = new Buttons[Players];
+        for (int f = 0; f < 20; f++)
+        {
+            Fill(live, buttons);
+            Simulation.Advance(live, rules, buttons);
+        }
+        Assert.Equal(FighterAction.Attack, live.Fighters[0].Action); // mid-spray
+        Assert.True(Simulation.TryGetActiveHitbox(in live.Fighters[0], rules.Tuning, out _));
+        GameState saved = live.Clone();
+        var expected = new ulong[120];
+        int[] seen = new int[8];
+        for (int i = 0; i < expected.Length; i++)
+        {
+            Fill(live, buttons);
+            Simulation.Advance(live, rules, buttons);
+            expected[i] = live.Checksum();
+            foreach (Fighter f in live.Fighters)
+            {
+                if (f.SlowFrames > 0) seen[0]++;
+                if (f.RootFrames > 0) seen[1]++;
+                if (f.DotFrames > 0) seen[2]++;
+                if (f.MarkFrames > 0) seen[3]++;
+                if (f.StunImmune > 0) seen[4]++;
+                if (f.StunWeapon != 0) seen[5]++;
+            }
+        }
+        Assert.All(seen[..6], n => Assert.True(n > 0, "every status was running"));
+        GameState replay = live.Clone();
+        replay.CopyFrom(saved);
+        for (int i = 0; i < expected.Length; i++)
+        {
+            Fill(replay, buttons);
+            Simulation.Advance(replay, rules, buttons);
+            Assert.True(expected[i] == replay.Checksum(), $"the replay differs {i + 1} frames after the save");
+        }
+    }
+
+    /// <summary>
+    /// Combat spec v0.4, batch 4: a match with a held guard, traps, a puddle, a cloud, bombs that
+    /// leave a wall and a patch, and the Gauntlet cycling is saved in the middle of the guard,
+    /// advanced 150 frames (across the frames where a burst becomes a wall or a zone), loaded into a
+    /// state that has moved on and advanced again: the checksums match frame by frame. The same
+    /// start played twice gives the same checksums too.
+    /// </summary>
+    [Fact]
+    public void RollbackAcrossGuardsTrapsAndPropsThatChangeRoleMatchesTheOriginalTimeline()
+    {
+        var rules = new MatchRules { Stage = Stages.Graybox, Weapons = true, Flurry = true };
+        GameState Start()
+        {
+            var s = Simulation.CreateInitialState(rules, Players, 41);
+            int[] xs = { -1, 3, -6, 6 };
+            for (int p = 0; p < Players; p++)
+            {
+                ref Fighter f = ref s.Fighters[p];
+                f.Position = new FixVec2(Fix.FromInt(xs[p]), Fix.Zero);
+                f.Velocity = FixVec2.Zero;
+                f.Grounded = true;
+                f.Facing = xs[p] < 0 ? 1 : -1;
+            }
+            (WeaponId, int)[] arms = { (WeaponId.Parat, 8), (WeaponId.Matka, 3), (WeaponId.GlueGun, 12), (WeaponId.JugaadGauntlet, 9) };
+            for (int p = 0; p < Players; p++)
+            {
+                s.Fighters[p].Weapon = arms[p].Item1;
+                s.Fighters[p].WeaponSupply = arms[p].Item2;
+            }
+            int slot = s.Props.Length - 1;
+            s.Props[slot--] = new Prop { Kind = PropKind.Shot, Shot = ShotKind.Mine, Weapon = WeaponId.MouseTrap, Owner = 2, Position = new FixVec2(Fix.FromInt(1), Fix.Zero), Grounded = true, Timer = 10 };
+            s.Props[slot--] = new Prop { Kind = PropKind.Shot, Shot = ShotKind.Mine, Weapon = WeaponId.BananaPeel, Owner = 3, Position = new FixVec2(Fix.FromInt(-3), Fix.Zero), Grounded = true };
+            s.Props[slot--] = new Prop { Kind = PropKind.Shot, Shot = ShotKind.Zone, Weapon = WeaponId.Lota, Owner = 1, Position = new FixVec2(Fix.FromInt(4), Fix.Zero), Grounded = true, Timer = 300 };
+            s.Props[slot--] = new Prop { Kind = PropKind.Shot, Shot = ShotKind.Zone, Weapon = WeaponId.StinkCloudCapsule, Owner = 0, Position = new FixVec2(Fix.FromInt(-5), Fix.Zero), Grounded = true, Timer = 360 };
+            s.Props[slot] = new Prop { Kind = PropKind.Shot, Shot = ShotKind.Mine, Weapon = WeaponId.VenomTrap, Owner = 1, Position = new FixVec2(Fix.FromInt(5), Fix.Zero), Grounded = true, Timer = 5 };
+            return s;
+        }
+        void Fill(GameState s, Buttons[] inputs)
+        {
+            inputs[0] = s.Frame % 70 < 50 ? Buttons.Light : Buttons.None; // holds the Parat's guard
+            inputs[1] = s.Frame % 40 == 0 ? Buttons.Light : s.Frame % 40 < 20 ? Buttons.Left : Buttons.Right;
+            inputs[2] = s.Frame % 30 < 15 ? Buttons.Light | Buttons.Right : Buttons.Left;
+            inputs[3] = SparringBot.Think(s, rules, 3, CpuLevel.Hard);
+        }
+        ulong[] Run()
+        {
+            GameState state = Start();
+            var sums = new ulong[300];
+            var inputs = new Buttons[Players];
+            for (int f = 0; f < sums.Length; f++)
+            {
+                Fill(state, inputs);
+                Simulation.Advance(state, rules, inputs);
+                sums[f] = state.Checksum();
+            }
+            return sums;
+        }
+        Assert.Equal(Run(), Run());
+
+        GameState live = Start();
+        var buttons = new Buttons[Players];
+        for (int f = 0; f < 6; f++)
+        {
+            Fill(live, buttons);
+            Simulation.Advance(live, rules, buttons);
+        }
+        Assert.True(Simulation.Guarding(in live.Fighters[0])); // mid-guard
+        GameState saved = live.Clone();
+        var expected = new ulong[150];
+        bool wall = false, patch = false, guarded = false;
+        for (int i = 0; i < expected.Length; i++)
+        {
+            Fill(live, buttons);
+            Simulation.Advance(live, rules, buttons);
+            expected[i] = live.Checksum();
+            wall |= live.Props.Any(p => p.Kind == PropKind.Shot && p.Shot == ShotKind.Wall);
+            patch |= live.Props.Any(p => p.Kind == PropKind.Shot && p.Shot == ShotKind.Zone && p.Weapon == WeaponId.GlueGun);
+            guarded |= Simulation.Guarding(in live.Fighters[0]);
+        }
+        Assert.True(wall, "a Matka left a wall");
+        Assert.True(patch, "a glue blob left a patch");
+        Assert.True(guarded);
+        GameState replay = live.Clone();
+        replay.CopyFrom(saved);
+        for (int i = 0; i < expected.Length; i++)
+        {
+            Fill(replay, buttons);
+            Simulation.Advance(replay, rules, buttons);
+            Assert.True(expected[i] == replay.Checksum(), $"the replay differs {i + 1} frames after the save");
+        }
+    }
+
+    /// <summary>
+    /// Combat spec v0.4, batch 5: a match with every status running and one prop of each of the 17
+    /// flights on the stage (a speaker, a pair of gates, a hanging anvil, a Decoy Crate and a rigged
+    /// crate among them), a box for a Hockey Stick to fling, a Matka and a Lota that land and leave
+    /// a wall and a puddle, and a Bowling Ball about to come to rest, with the batch's weapons in
+    /// hand (a Teleporter blinking, a Detonator placing and bursting, a CPU with the Swap Ray). It is
+    /// saved every 10 frames over its first 160 (so across the frame of each Become), advanced 120
+    /// frames, loaded into a state that has moved on and advanced again: the checksums match frame
+    /// by frame. The same start played twice gives the same checksums too.
+    /// </summary>
+    [Fact]
+    public void RollbackWithEveryStatusAndOneOfEachPropMatchesTheOriginalTimeline()
+    {
+        var rules = new MatchRules { Stage = Stages.Graybox, Weapons = true, Flurry = true };
+        GameState Start()
+        {
+            var s = Simulation.CreateInitialState(rules, Players, 51);
+            s.PropTimer = 40;
+            s.LastBoxWeapon = WeaponId.Uzi;
+            int[] xs = { -3, 3, -7, 7 };
+            (WeaponId, int)[] arms = { (WeaponId.Teleporter, 3), (WeaponId.CrateDetonator, 6), (WeaponId.HockeyStick, 8), (WeaponId.SwapRay, 3) };
+            for (int p = 0; p < Players; p++)
+            {
+                ref Fighter f = ref s.Fighters[p];
+                f.Position = new FixVec2(Fix.FromInt(xs[p]), Fix.Zero);
+                f.Velocity = FixVec2.Zero;
+                f.Grounded = true;
+                f.Facing = xs[p] < 0 ? 1 : -1;
+                f.Weapon = arms[p].Item1;
+                f.WeaponSupply = arms[p].Item2;
+            }
+            s.Fighters[0].SlowFrames = 100;
+            s.Fighters[0].MarkFrames = 200;
+            s.Fighters[1].RootFrames = 60;
+            s.Fighters[1].StunWeapon = (int)WeaponId.Net;
+            s.Fighters[1].StunImmune = 150;
+            s.Fighters[2].DotFrames = 240;
+            s.Fighters[2].DotBy = 2;
+            s.Fighters[2].DotWeapon = (int)WeaponId.VenomDartLauncher;
+            s.Fighters[3].DotFrames = 90;
+            s.Fighters[3].DotBy = 1;
+            s.Fighters[3].DotWeapon = (int)WeaponId.Flamethrower;
+            s.Fighters[3].Action = FighterAction.Stunned;
+            s.Fighters[3].HitstunFrames = 40;
+            s.Fighters[3].StunWeapon = (int)WeaponId.FreezeRay;
+
+            // One of each flight, and the props that are about to change role. (x, y in cm.)
+            (ShotKind, WeaponId, int, int, int, int, int, int)[] props =
+            {
+                // flight, weapon, x, y, vx, timer, owner, supply
+                (ShotKind.Roll, WeaponId.Chicken, 100, 0, 16, 0, 0, 0),
+                (ShotKind.Bullet, WeaponId.Uzi, 600, 80, -70, 0, 3, 0),
+                (ShotKind.Bomb, WeaponId.Matka, 100, 300, 0, 90, 2, 0),
+                (ShotKind.Arrow, WeaponId.Bow, 800, 120, -55, 0, 0, 0),
+                (ShotKind.Thrown, WeaponId.Belan, -560, 320, 32, 0, 3, 0),
+                (ShotKind.Boomerang, WeaponId.Boomerang, 500, 100, -50, 0, 3, 3),
+                (ShotKind.Pad, WeaponId.Trampoline, 850, 0, 0, 600, 1, 0),
+                (ShotKind.Mine, WeaponId.Mines, -500, 0, 0, 0, 3, 0),
+                (ShotKind.Missile, WeaponId.HomingMissile, 0, 600, 20, 0, 1, 0),
+                (ShotKind.Hole, WeaponId.BlackHoleBomb, 400, 0, 0, 100, 0, 0),
+                (ShotKind.Lob, WeaponId.Snowballs, -200, 200, 28, 0, 2, 0),
+                (ShotKind.Zone, WeaponId.StinkCloudCapsule, -100, 0, 0, 300, 2, 0),
+                (ShotKind.Wall, WeaponId.Matka, 200, 0, 0, 240, 3, 0),
+                (ShotKind.Speaker, WeaponId.SonicSpeaker, -150, 0, 0, 480, 2, 1),
+                (ShotKind.Gate, WeaponId.PortalDisc, -850, 0, 0, 600, 3, 0),
+                (ShotKind.Gate, WeaponId.PortalDisc, 50, 300, 0, 600, 3, 0),
+                (ShotKind.Drop, WeaponId.Anvil, 300, 900, 0, 30, 0, 0),
+                (ShotKind.Decoy, WeaponId.DecoyCrate, -250, 0, 0, 1200, 1, (int)WeaponId.Uzi),
+                (ShotKind.Decoy, WeaponId.CrateDetonator, 450, 0, 0, 1200, 1, (int)WeaponId.Uzi),
+                (ShotKind.Bomb, WeaponId.Lota, -350, 250, 0, 60, 0, 0),
+                (ShotKind.Roll, WeaponId.BowlingBall, 600, 0, -22, 0, 2, 0),
+            };
+            int slot = s.Props.Length - 1;
+            foreach (var (shot, w, x, y, vx, timer, owner, supply) in props)
+                s.Props[slot--] = new Prop
+                {
+                    Kind = PropKind.Shot, Shot = shot, Weapon = w, Owner = owner, OwnerClear = true, Supply = supply,
+                    Position = new FixVec2(Fix.FromRatio(x, 100), Fix.FromRatio(y, 100)), Velocity = new FixVec2(Fix.FromRatio(vx, 100), Fix.Zero),
+                    Grounded = y == 0, Timer = timer, Age = w == WeaponId.BowlingBall ? Weapons.Get(w).Life - 30 : 0,
+                };
+            s.Props[0] = new Prop { Kind = PropKind.Box, Weapon = WeaponId.Bow, Supply = 6, Owner = -1, Position = new FixVec2(Fix.FromInt(-6), Fix.Zero), Grounded = true };
+            return s;
+        }
+        void Fill(GameState s, Buttons[] inputs)
+        {
+            inputs[0] = s.Frame % 40 == 0 ? Buttons.Light | (s.Frame % 80 == 0 ? Buttons.Up : Buttons.None) : s.Frame % 40 < 20 ? Buttons.Right : Buttons.Left;
+            inputs[1] = s.Frame % 45 == 5 ? Buttons.Light : s.Frame % 60 < 30 ? Buttons.Left : Buttons.Right;
+            inputs[2] = s.Frame % 30 == 0 ? Buttons.Light : Buttons.Right;
+            inputs[3] = SparringBot.Think(s, rules, 3, CpuLevel.Hard);
+        }
+        ulong[] Run()
+        {
+            GameState state = Start();
+            var sums = new ulong[300];
+            var inputs = new Buttons[Players];
+            for (int f = 0; f < sums.Length; f++)
+            {
+                Fill(state, inputs);
+                Simulation.Advance(state, rules, inputs);
+                sums[f] = state.Checksum();
+            }
+            return sums;
+        }
+        Assert.Equal(Run(), Run());
+
+        GameState live = Start();
+        var buttons = new Buttons[Players];
+        var flights = new HashSet<ShotKind>();
+        bool wall = false, puddle = false, rested = false, flung = false, blinked = false;
+        int[] seen = new int[6];
+        for (int from = 0; from <= 160; from += 10)
+        {
+            while (live.Frame < from)
+            {
+                Fill(live, buttons);
+                Simulation.Advance(live, rules, buttons);
+            }
+            GameState saved = live.Clone();
+            GameState ahead = live.Clone();
+            var expected = new ulong[120];
+            for (int i = 0; i < expected.Length; i++)
+            {
+                Fill(ahead, buttons);
+                Simulation.Advance(ahead, rules, buttons);
+                expected[i] = ahead.Checksum();
+                foreach (Prop p in ahead.Props)
+                {
+                    if (p.Kind == PropKind.Shot) flights.Add(p.Shot);
+                    wall |= p.Kind == PropKind.Shot && p.Shot == ShotKind.Wall && p.Weapon == WeaponId.Matka && p.Timer < 240 - 30;
+                    puddle |= p.Kind == PropKind.Shot && p.Shot == ShotKind.Zone && p.Weapon == WeaponId.Lota;
+                    rested |= p.Kind == PropKind.Item && p.Weapon == WeaponId.BowlingBall;
+                    flung |= p.Kind == PropKind.Shot && p.Shot == ShotKind.Thrown && p.Supply > 0;
+                }
+                blinked |= ahead.Fighters[0].WeaponSupply < 3 && ahead.Fighters[0].Weapon == WeaponId.Teleporter;
+                foreach (Fighter f in ahead.Fighters)
+                {
+                    if (f.SlowFrames > 0) seen[0]++;
+                    if (f.RootFrames > 0) seen[1]++;
+                    if (f.DotFrames > 0) seen[2]++;
+                    if (f.MarkFrames > 0) seen[3]++;
+                    if (f.StunImmune > 0) seen[4]++;
+                    if (f.StunWeapon != 0) seen[5]++;
+                }
+            }
+            GameState replay = ahead.Clone();
+            replay.CopyFrom(saved);
+            for (int i = 0; i < expected.Length; i++)
+            {
+                Fill(replay, buttons);
+                Simulation.Advance(replay, rules, buttons);
+                Assert.True(expected[i] == replay.Checksum(), $"the replay from frame {from} differs {i + 1} frames after the save");
+            }
+        }
+        for (int k = 1; k <= 17; k++) Assert.Contains((ShotKind)k, flights);
+        Assert.All(seen, n => Assert.True(n > 0, "every status was running"));
+        Assert.True(wall, "a Matka left a wall");
+        Assert.True(puddle, "a Lota left a puddle");
+        Assert.True(rested, "the Bowling Ball came to rest");
+        Assert.True(blinked, "the Teleporter blinked");
+        Assert.True(flung, "the Hockey Stick flung the box");
     }
 }

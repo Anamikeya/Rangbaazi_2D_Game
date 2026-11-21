@@ -99,6 +99,12 @@ public static class SparringBot
     /// <summary>Press dodge this many frames before an attack's first active frame: inside the parry window.</summary>
     private const int ParryLead = 3;
 
+    /// <summary>A weapon the bot throws (its row's cpuMax is -1) is thrown at an opponent lined up this close.</summary>
+    private static readonly Fix ThrowRange = Fix.FromInt(5);
+
+    /// <summary>The Crate Detonator is pressed again once an opponent is this close to one of the bot's crates.</summary>
+    private static readonly Fix CrateNear = Fix.FromRatio(3, 2);
+
     /// <summary>
     /// The bot's buttons for this frame. <paramref name="level"/> defaults to
     /// <see cref="CpuLevel.Hard"/>, which is what <see cref="SmokeScript"/> plays.
@@ -114,7 +120,15 @@ public static class SparringBot
 
         if (me.HitStop > 0) return Buttons.None; // frozen: nothing it presses would do anything yet
         if (me.Action == FighterAction.Attack)
-            return me.Move == MoveId.UziFire && me.UziShots < UziBurst ? Buttons.Light : SteerDuringMove(in me, stage, t);
+        {
+            // A repeating weapon or a spray: keep the button held for the row's burst (shots or ticks).
+            // Nothing else is held, so the Parat's guard never waits: its bash comes straight out.
+            WeaponRow? firing = Weapons.RowOfMove(me.Move);
+            // A blink below the stage top is a recovery: Up stays held, so it lands on a platform above.
+            if (firing != null && firing.Use == WeaponUse.Blink) return me.Position.Y < stage.MaxY ? Buttons.Up : Buttons.None;
+            return firing != null && (firing.Interval > 0 || firing.Use == WeaponUse.Spray) && me.BurstShots < firing.CpuBurst
+                ? Buttons.Light : SteerDuringMove(in me, stage, t);
+        }
         if (me.Action != FighterAction.Idle) return Buttons.None; // dodging, in hitstun, stunned or out
 
         Buttons last = me.PreviousButtons; // jump, attacks and dodge only fire on a fresh press
@@ -126,9 +140,9 @@ public static class SparringBot
         // Recovery: off the sides of the main stage, or below its top surface.
         bool offStage = me.Position.X < stage.MinX || me.Position.X > stage.MaxX
             || (!me.Grounded && me.Position.Y < stage.MaxY);
-        if (offStage) return Recover(in me, stage, canJump, canHeavy, canDodge);
+        if (offStage) return Recover(in me, rules.Stage, stage, canJump, canJab, canHeavy, canDodge);
 
-        int target = NearestOpponent(fighters, self);
+        int target = NearestOpponent(state, self, rules);
         if (target < 0) return Buttons.None;
         ref readonly Fighter op = ref fighters[target];
 
@@ -142,6 +156,10 @@ public static class SparringBot
 
         Buttons b = Buttons.None;
         int floor = me.Grounded ? StandingOn(in me, rules.Stage) : -1;
+        // Armed with a weapon it shouldn't press at fist range now, on the ground or in the air: a
+        // Detonator whose crates are out (they would go off), or a row it only throws.
+        WeaponRow armed = WeaponTable.Rows[(int)me.Weapon];
+        bool holdFire = me.Weapon != WeaponId.None && ((armed.Use == WeaponUse.Detonate && OwnsDecoy(state, self)) || armed.CpuMax < Fix.Zero);
 
         // Weapons: empty-handed, fetch a box or loose weapon on the same platform; with a gun, the
         // bow, the bombs or the ball, fire from range once lined up. Melee weapons fight like fists.
@@ -149,7 +167,7 @@ public static class SparringBot
         {
             if (me.Weapon == WeaponId.None)
             {
-                int item = NearestItem(state, in me, self, rules.Stage.Platforms[floor]);
+                int item = NearestItem(state, rules, in me, self, rules.Stage.Platforms[floor]);
                 if (item >= 0 && Fix.Abs(dx) > JabRange)
                 {
                     Fix toItem = state.Props[item].Position.X - me.Position.X;
@@ -158,8 +176,24 @@ public static class SparringBot
             }
             else
             {
-                Fix reach = RangedReach(me.Weapon);
-                if (reach > Fix.Zero && Fix.Abs(dy) < Fix.One && Fix.Abs(dx) <= reach && Fix.Abs(dx) >= RangedMin(me.Weapon))
+                // The row's range: how far it is worth firing from (0: used like fists), and how
+                // close is too close (a lobbed bomb would land behind them, or on the bot).
+                WeaponRow held = WeaponTable.Rows[(int)me.Weapon];
+                if (held.Use == WeaponUse.Detonate && holdFire)
+                {
+                    // Its crates are out: burst them once an opponent is beside one and the bot isn't.
+                    if (canJab && CrateSprung(state, rules, self, held)) return Buttons.Light;
+                }
+                else if (held.CpuMax < Fix.Zero)
+                {
+                    // A row it throws (the Teleporter, kept for recovering when it is off the stage).
+                    if (Fix.Abs(dy) < Fix.One && Fix.Abs(dx) <= ThrowRange)
+                    {
+                        if (me.Facing != dir) return toward;
+                        return (last & Buttons.DropWeapon) == 0 && !Hesitates(state.Frame, self, skill.AttackOdds) ? Buttons.DropWeapon : Buttons.None;
+                    }
+                }
+                else if (held.CpuMax > Fix.Zero && Fix.Abs(dy) < Fix.One && Fix.Abs(dx) <= held.CpuMax && Fix.Abs(dx) >= held.CpuMin)
                 {
                     if (me.Facing != dir) return toward;
                     return canJab && !Hesitates(state.Frame, self, skill.AttackOdds) ? Buttons.Light : Buttons.None;
@@ -176,7 +210,8 @@ public static class SparringBot
         }
         else if (Fix.Abs(dx) <= JabRange && SafeToAttack(in me, stage, t))
         {
-            if (me.Facing != dir) b |= toward; // turn to face them
+            if (holdFire) { } // nothing to press at fist range: it waits beside them
+            else if (me.Facing != dir) b |= toward; // turn to face them
             else if (Fix.Abs(dy) < Fix.One && !Hesitates(state.Frame, self, skill.AttackOdds))
             {
                 // Lunge room is measured on whatever it stands on: a floating platform's end is an edge too.
@@ -244,30 +279,11 @@ public static class SparringBot
         return canJab ? Buttons.Light : Buttons.None;
     }
 
-    /// <summary>Uzi bullets the bot fires in one held burst.</summary>
-    private const int UziBurst = 8;
-
-    /// <summary>How far a shooting weapon is worth firing from (0: a melee weapon, used like fists).</summary>
-    private static Fix RangedReach(WeaponId w) => w switch
-    {
-        WeaponId.Shotgun => Fix.FromInt(4),
-        WeaponId.Uzi => Fix.FromInt(9),
-        WeaponId.BowlingBall => Fix.FromInt(12),
-        WeaponId.CherryBombs => Fix.FromInt(6),
-        WeaponId.Bow => Fix.FromInt(15),
-        WeaponId.Boomerang => Fix.FromInt(8),
-        WeaponId.HomingMissile => Fix.FromInt(14),
-        WeaponId.BlackHoleBomb => Fix.FromInt(6),
-        _ => Fix.Zero,
-    };
-
-    /// <summary>Closer than this, lobbing a bomb would land it behind them (or on the bot).</summary>
-    private static Fix RangedMin(WeaponId w) =>
-        w == WeaponId.HomingMissile ? Fix.FromInt(3) // any closer and its burst catches the shooter
-        : w == WeaponId.CherryBombs || w == WeaponId.BlackHoleBomb ? Fix.FromRatio(5, 2) : Fix.Zero;
-
-    /// <summary>The nearest box or loose weapon resting on this platform within 5 m, or -1.</summary>
-    private static int NearestItem(GameState state, in Fighter me, int self, FixRect floor)
+    /// <summary>
+    /// The nearest box or loose weapon resting on this platform within 5 m, or -1. A decoy looks
+    /// like a box to everyone but its owner's side, so the bot walks to those too.
+    /// </summary>
+    private static int NearestItem(GameState state, MatchRules rules, in Fighter me, int self, FixRect floor)
     {
         Prop[] props = state.Props;
         int best = -1;
@@ -275,7 +291,8 @@ public static class SparringBot
         for (int i = 0; i < props.Length; i++)
         {
             ref readonly Prop p = ref props[i];
-            if ((p.Kind != PropKind.Box && p.Kind != PropKind.Item) || !p.Grounded || p.IgnoreFighter == self + 1) continue;
+            bool decoy = p.Kind == PropKind.Shot && p.Shot == ShotKind.Decoy && (p.Owner < 0 || !Simulation.Allies(rules, self, p.Owner));
+            if ((p.Kind != PropKind.Box && p.Kind != PropKind.Item && !decoy) || !p.Grounded || p.IgnoreFighter == self + 1) continue;
             if (p.Position.Y != floor.MaxY || p.Position.X < floor.MinX || p.Position.X > floor.MaxX) continue;
             Fix d = Fix.Abs(p.Position.X - me.Position.X);
             if (d > Fix.FromInt(5)) continue;
@@ -294,14 +311,59 @@ public static class SparringBot
     /// fighter gains the most), and a bot that drifted out above the stage would have nothing left
     /// by the time it needs it.
     /// </summary>
-    private static Buttons Recover(in Fighter me, FixRect stage, bool canJump, bool canHeavy, bool canDodge)
+    private static Buttons Recover(in Fighter me, StageDefinition arena, FixRect stage, bool canJump, bool canJab, bool canHeavy, bool canDodge)
     {
         Buttons home = me.Position.X < Fix.Zero ? Buttons.Right : Buttons.Left;
         bool falling = me.Velocity.Y < Fix.Zero && me.Position.Y < stage.MaxY;
         if (!falling) return home;
+        // A Teleporter with a blink left goes first, when there is a platform to blink onto (facing home).
+        WeaponRow held = WeaponTable.Rows[(int)me.Weapon];
+        if (held.Use == WeaponUse.Blink && me.WeaponSupply > 0)
+        {
+            Fighter facingHome = me;
+            facingHome.Facing = me.Position.X < Fix.Zero ? 1 : -1;
+            if (Simulation.BlinkSpot(arena, in facingHome, held.Reach, true, out _)) return canJab ? home | Buttons.Up | Buttons.Light : home;
+        }
         if (me.AirJumpsLeft > 0) return canJump ? home | Buttons.Jump : home;
         if (!me.RecoveryUsed) return canHeavy ? home | Buttons.Up | Buttons.Heavy : home;
         return canDodge ? home | Buttons.Up | Buttons.Dodge : home;
+    }
+
+    /// <summary>Whether the bot owns a decoy on the stage (a Crate Detonator's rigged crate, or a Decoy Crate).</summary>
+    private static bool OwnsDecoy(GameState state, int self)
+    {
+        Prop[] props = state.Props;
+        for (int i = 0; i < props.Length; i++)
+            if (props[i].Kind == PropKind.Shot && props[i].Shot == ShotKind.Decoy && props[i].Owner == self) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Time to burst its crates: an opponent stands within 1.5 m of one of the bot's decoys, and the
+    /// bot itself is clear (by a metre) of every one's blast, since they all go off together.
+    /// </summary>
+    private static bool CrateSprung(GameState state, MatchRules rules, int self, WeaponRow detonator)
+    {
+        Fighter[] fighters = state.Fighters;
+        Prop[] props = state.Props;
+        Fix clear = detonator.BlastHalf + Fix.One;
+        for (int i = 0; i < props.Length; i++)
+        {
+            ref readonly Prop p = ref props[i];
+            if (p.Kind != PropKind.Shot || p.Shot != ShotKind.Decoy || p.Owner != self) continue;
+            if (Fix.Abs(fighters[self].Position.X - p.Position.X) <= clear && Fix.Abs(fighters[self].Position.Y - p.Position.Y) <= clear) return false;
+        }
+        for (int i = 0; i < props.Length; i++)
+        {
+            ref readonly Prop p = ref props[i];
+            if (p.Kind != PropKind.Shot || p.Shot != ShotKind.Decoy || p.Owner != self) continue;
+            for (int d = 0; d < fighters.Length; d++)
+            {
+                if (Simulation.Allies(rules, self, d) || !fighters[d].IsActive) continue;
+                if (Fix.Abs(fighters[d].Position.X - p.Position.X) <= CrateNear && Fix.Abs(fighters[d].Position.Y - p.Position.Y) < Fix.One) return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>During a move the bot can steer (the up heavy), steer home if it is off the side.</summary>
@@ -331,7 +393,7 @@ public static class SparringBot
 
         for (int i = 0; i < fighters.Length; i++)
         {
-            if (i == self) continue;
+            if (Simulation.Allies(rules, self, i)) continue; // itself, or a teammate's swing
             ref readonly Fighter op = ref fighters[i];
             MoveData? m = Simulation.CurrentMove(in op, rules.Tuning);
             if (m == null || op.AttackConnected || op.HitStop > 0) continue;
@@ -464,15 +526,21 @@ public static class SparringBot
     /// <summary>The bot attacks on about 1 eligible frame in this many.</summary>
     internal static int JabOdds(CpuLevel level) => SkillFor(level).AttackOdds;
 
-    private static int NearestOpponent(Fighter[] fighters, int self)
+    /// <summary>
+    /// The nearest fighter who is still in and isn't on the bot's team, or -1. A fighter hidden in a
+    /// cloud is only seen from 2 m or nearer.
+    /// </summary>
+    private static int NearestOpponent(GameState state, int self, MatchRules rules)
     {
+        Fighter[] fighters = state.Fighters;
         FixVec2 at = fighters[self].Position;
         int best = -1;
         Fix bestDist = Fix.Zero;
         for (int i = 0; i < fighters.Length; i++)
         {
-            if (i == self || !fighters[i].IsActive) continue;
+            if (Simulation.Allies(rules, self, i) || !fighters[i].IsActive) continue;
             Fix d = (fighters[i].Position - at).LengthSquared;
+            if (d > Weapons.HiddenSeen * Weapons.HiddenSeen && Simulation.IsHidden(state, rules, i)) continue;
             if (best < 0 || d < bestDist)
             {
                 best = i;

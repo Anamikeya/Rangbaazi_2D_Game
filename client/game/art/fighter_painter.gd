@@ -18,16 +18,10 @@ const MOVE_CLIPS := {
 }
 
 ## Weapon attacks borrow a fist move's poses, stretched so the clip's strike lands on the weapon's
-## release frame: [clip, the clip's strike frame].
-const WEAPON_CLIPS := {
-	MoveData.Id.BELAN_BONK: ["neutral_heavy", 14], MoveData.Id.BAT_SWING: ["side_heavy", 16],
-	MoveData.Id.SHOTGUN_BLAST: ["jab", 4], MoveData.Id.BALL_ROLL: ["down_heavy", 12],
-	MoveData.Id.UZI_FIRE: ["jab", 4], MoveData.Id.BOMB_LOB: ["neutral_heavy", 14],
-	MoveData.Id.BOW_SHOT: ["jab", 4], MoveData.Id.WEAPON_THROW: ["jab", 4],
-	MoveData.Id.BOOMERANG_THROW: ["side_heavy", 16], MoveData.Id.PAD_PLACE: ["down_heavy", 12],
-	MoveData.Id.MINE_PLANT: ["down_heavy", 12], MoveData.Id.MISSILE_FIRE: ["jab", 4],
-	MoveData.Id.HOLE_LOB: ["neutral_heavy", 14],
-}
+## release frame. Which clip a weapon borrows is in the weapon table (WeaponInfo.clip, by the row
+## whose move it is); a throw borrows the jab. This is each of those clips' strike frame.
+const CLIP_STRIKE := {"jab": 4, "neutral_heavy": 14, "side_heavy": 16, "down_heavy": 12}
+const THROW_CLIP := "jab"
 ## Standing still (and posing in the fighter picker), the pack holds the fists up at eye height,
 ## where beside a round head they read as eyebrows. In these clips a fist stays at least
 ## GUARD_BELOW art pixels below the middle of the head, keeping GUARD_KEEP of any rise above that.
@@ -73,6 +67,8 @@ var _prev_running := false
 var _still_frames := 0
 var _fidget_b := false
 var _result_start := -1
+# The rig's parts that have a spring (made on first use; "-" alone when it has none).
+var _spring_parts: Array[String] = []
 
 
 func _init(id: String) -> void:
@@ -173,8 +169,9 @@ func pick(f: Fighter, frame: int, result: int = Result.NONE, rules: MatchRules =
 				if not f.grounded and af < 49:
 					return ["ground_slam_plunge", af - SLAM_HANG]
 				return ["ground_slam_impact", maxi(0, af - 49)]
-			if WEAPON_CLIPS.has(f.move) and rules != null:
-				return _weapon_pose(f, rules)
+			var weapon_clip := THROW_CLIP if f.move == MoveData.Id.WEAPON_THROW else WeaponInfo.clip(Weapons.row_of_move(f.move))
+			if CLIP_STRIKE.has(weapon_clip) and rules != null:
+				return _weapon_pose(f, rules, weapon_clip)
 			return [MOVE_CLIPS.get(f.move, "jab"), af]
 		Fighter.Action.DODGE:
 			if not f.grounded:
@@ -209,17 +206,16 @@ func pick(f: Fighter, frame: int, result: int = Result.NONE, rules: MatchRules =
 
 ## A weapon attack's pose: a fist move's clip, with its wind-up stretched to end on the weapon's
 ## release frame and its follow-through stretched over the weapon's recovery.
-func _weapon_pose(f: Fighter, rules: MatchRules) -> Array:
-	var entry: Array = WEAPON_CLIPS[f.move]
-	var clip := ArtLibrary.clip(character_id, str(entry[0]))
+func _weapon_pose(f: Fighter, rules: MatchRules, clip_name: String) -> Array:
+	var clip := ArtLibrary.clip(character_id, clip_name)
 	var length := int(clip.get("d", 1))
-	var strike := int(entry[1])
+	var strike := int(CLIP_STRIKE[clip_name])
 	var m := rules.tuning.moves.get_move(f.move)
 	var af := float(f.action_frame)
 	var cf := af * strike / maxf(1.0, m.startup)
 	if af > m.startup:
 		cf = strike + (af - m.startup) * (length - strike) / maxf(1.0, m.total_frames() - m.startup)
-	return [str(entry[0]), clampi(int(cf), 0, length - 1)]
+	return [clip_name, clampi(int(cf), 0, length - 1)]
 
 
 ## Draws the fighter on `canvas` with its feet at `feet` (screen pixels), `px` screen pixels per
@@ -234,54 +230,92 @@ func draw(canvas: CanvasItem, feet: Vector2, px: float, facing: int, clip_name: 
 		clip_name = "idle"
 	var d := maxi(1, int(clip.get("d", 1)))
 	var f := frame % d if bool(clip.get("loop", false)) else clampi(frame, 0, d - 1)
+	var base := Transform2D(0.0, Vector2(px * facing, px), 0.0, feet)
+	var world: Dictionary = {}
+	for e: Array in _plan(clip_name, clip, f):
+		var part: String = e[0]
+		var pose: Array = e[1]
+		var spin := _spring_angle(part) if not _springs.is_empty() else 0.0
+		var local: Transform2D = e[2] if spin == 0.0 else Transform2D(pose[2] + spin, Vector2(pose[3], pose[4]), 0.0, Vector2(pose[0], pose[1]))
+		var parent: String = e[3]
+		var m: Transform2D = ((world[parent] if world.has(parent) else e[4]) * local) if parent != "" else local
+		world[part] = m
+		if e[5]:
+			continue # a spring piece the pack's extras would draw (PACK_EXTRAS)
+		if part == "frontHand":
+			hand_position = (base * m).origin
+			hand_valid = true
+		var tex: Texture2D = e[6]
+		if tex == null:
+			continue
+		canvas.draw_set_transform_matrix(base * m)
+		canvas.draw_texture_rect(tex, e[7], false, Color(tint.r, tint.g, tint.b, float(e[8]) * alpha))
+	canvas.draw_set_transform_matrix(Transform2D.IDENTITY)
+
+
+## What draw() does for frame f of a clip, worked out once and kept (rooms v1, polish 6: fifteen
+## fighters sampled their keyframes from dictionaries on every frame): per part in draw order,
+## [part, pose, its local transform without a spring, parent, the parent's own transform for when
+## the parent isn't drawn, skipped, texture, rect, opacity]. Everything but the springs depends only
+## on the clip and the frame. A frame whose textures haven't all loaded isn't kept.
+var _plans: Dictionary = {}
+var _planned := 0
+const PLAN_LIMIT := 6000
+
+
+func _plan(clip_name: String, clip: Dictionary, f: int) -> Array:
+	var per: Dictionary = _plans.get(clip_name, {})
+	if per.has(f):
+		return per[f]
 	var parts: Dictionary = _rig["parts"]
 	var guard := GUARD_CLIPS.has(clip_name)
 	var guard_y := 0.0
 	if guard:
 		guard_y = float(_sample(clip, "head", f, parts.get("head", {}))[1]) + GUARD_BELOW
-	var order := _draw_order(clip, f, parts)
-	var base := Transform2D(0.0, Vector2(px * facing, px), 0.0, feet)
-	var world: Dictionary = {}
-	for part: String in order:
+	var out: Array = []
+	var complete := true
+	for part: String in _draw_order(clip, f, parts):
 		var spec: Dictionary = parts.get(part, {})
 		if spec.is_empty():
 			continue
 		var pose := _sample(clip, part, f, spec)
 		if guard and (part == "frontHand" or part == "backHand") and pose[1] < guard_y:
 			pose[1] = guard_y + (pose[1] - guard_y) * GUARD_KEEP
-		var local := Transform2D(pose[2] + _spring_angle(part), Vector2(pose[3], pose[4]), 0.0, Vector2(pose[0], pose[1]))
+		var local := Transform2D(pose[2], Vector2(pose[3], pose[4]), 0.0, Vector2(pose[0], pose[1]))
 		var parent := str(spec.get("parent", ""))
-		var m: Transform2D = (world[parent] if world.has(parent) else _part_transform(clip, parent, f, parts)) * local if parent != "" else local
-		world[part] = m
-		if not PACK_EXTRAS and spec.has("spring"):
-			continue
-		if part == "frontHand":
-			hand_position = (base * m).origin
-			hand_valid = true
-		var slot := _slot(clip, part, f, spec)
-		var textures: Dictionary = spec.get("textures", {})
-		if part == "head" and not PACK_FACES:
-			slot = "" # the head's own face, below
-		if not textures.has(slot):
-			slot = str(spec.get("texture", "normal"))
-		var file: Variant = textures.get(slot, null)
-		if file == null:
-			continue
-		var tex := ArtLibrary.character_texture(character_id, str(file))
-		if tex == null:
-			continue
-		var w := float(spec.get("width", 32))
-		var h := float(spec.get("height", 32))
-		var pivot: Dictionary = spec.get("pivot", {"x": 0.5, "y": 0.5})
-		var geo: Dictionary = spec.get("textureGeometry", {}).get(slot, {})
-		if not geo.is_empty():
-			w = float(geo.get("width", w))
-			h = float(geo.get("height", h))
-			pivot = geo.get("pivot", pivot)
-		canvas.draw_set_transform_matrix(base * m)
-		var rect := Rect2(-w * float(pivot["x"]), -h * float(pivot["y"]), w, h)
-		canvas.draw_texture_rect(tex, rect, false, Color(tint.r, tint.g, tint.b, clampf(pose[5], 0.0, 1.0) * alpha))
-	canvas.draw_set_transform_matrix(Transform2D.IDENTITY)
+		var parent_own := _part_transform(clip, parent, f, parts) if parent != "" else Transform2D.IDENTITY
+		var skipped := not PACK_EXTRAS and spec.has("spring")
+		var tex: Texture2D = null
+		var rect := Rect2()
+		if not skipped:
+			var slot := _slot(clip, part, f, spec)
+			var textures: Dictionary = spec.get("textures", {})
+			if part == "head" and not PACK_FACES:
+				slot = "" # the head's own face, below
+			if not textures.has(slot):
+				slot = str(spec.get("texture", "normal"))
+			var file: Variant = textures.get(slot, null)
+			if file != null:
+				tex = ArtLibrary.character_texture(character_id, str(file))
+				complete = complete and tex != null
+				var w := float(spec.get("width", 32))
+				var h := float(spec.get("height", 32))
+				var pivot: Dictionary = spec.get("pivot", {"x": 0.5, "y": 0.5})
+				var geo: Dictionary = spec.get("textureGeometry", {}).get(slot, {})
+				if not geo.is_empty():
+					w = float(geo.get("width", w))
+					h = float(geo.get("height", h))
+					pivot = geo.get("pivot", pivot)
+				rect = Rect2(-w * float(pivot["x"]), -h * float(pivot["y"]), w, h)
+		out.append([part, pose, local, parent, parent_own, skipped, tex, rect, clampf(pose[5], 0.0, 1.0)])
+	if complete:
+		if _planned >= PLAN_LIMIT:
+			_plans.clear()
+			_planned = 0
+		per[f] = out
+		_plans[clip_name] = per
+		_planned += 1
+	return out
 
 
 ## [x, y, rotation, scaleX, scaleY, opacity] of a part at a frame: keys eased with the next key's
@@ -365,10 +399,15 @@ static func _ease(i: int, t: float) -> float:
 ## Springs on split pieces: they lean against the fighter's motion and wobble back, stiff or loose
 ## by the rig's settings (stiffness and bounce, 0 to 1).
 func _step_springs() -> void:
-	for part: String in _rig.get("parts", {}).keys():
-		var spring: Dictionary = _rig["parts"][part].get("spring", {})
-		if spring.is_empty():
+	if _spring_parts.is_empty() and not _rig.is_empty():
+		_spring_parts = ["-"] # none found yet: marks the list as made
+		for part: String in _rig.get("parts", {}).keys():
+			if not (_rig["parts"][part].get("spring", {}) as Dictionary).is_empty():
+				_spring_parts.append(part)
+	for part: String in _spring_parts:
+		if part == "-":
 			continue
+		var spring: Dictionary = _rig["parts"][part]["spring"]
 		var s: Array = _springs.get(part, [0.0, 0.0])
 		var stiffness := 0.04 + 0.3 * float(spring.get("stiffness", 0.5))
 		var damping := 0.04 + 0.3 * (1.0 - float(spring.get("bounce", 0.5)))

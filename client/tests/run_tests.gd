@@ -6,9 +6,19 @@ extends SceneTree
 
 const TEST_SCRIPTS := [
 	"res://tests/test_golden_traces.gd",
+	"res://tests/test_weapon_table.gd",
+	"res://tests/test_weapon_rules.gd",
+	"res://tests/test_teams.gd",
+	"res://tests/test_state_coverage.gd",
 	"res://tests/test_rollback.gd",
 	"res://tests/test_protocol.gd",
 	"res://tests/test_mix.gd",
+	"res://tests/test_presentation.gd",
+	"res://tests/test_hud.gd",
+	"res://tests/test_menus.gd",
+	"res://tests/test_polish.gd",
+	"res://tests/test_review_fixes.gd",
+	"res://tests/test_final_round.gd",
 ]
 
 

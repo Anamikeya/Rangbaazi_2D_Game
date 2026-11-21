@@ -3,7 +3,9 @@ extends RefCounted
 ## Frame data for one move (MoveData.cs; numbers documented in docs/design/combat-spec-v0.1.md).
 ## Immutable once built. Fix fields are in Fx units.
 
-## Weapon attacks (BELAN_BONK on) are shared by every fighter: see Weapons.
+## Weapon attacks (BELAN_BONK on) are shared by every fighter. Each is the move of one row of the
+## weapon table; rows after the twelve named here have move ids with no name (7 + the weapon's id),
+## and the engine reads a weapon move through Weapons.row_of_move, never by name.
 enum Id { NONE, JAB, NEUTRAL_HEAVY, SIDE_HEAVY, UP_HEAVY, DOWN_HEAVY, GROUND_SLAM,
 	BELAN_BONK, BAT_SWING, SHOTGUN_BLAST, BALL_ROLL, UZI_FIRE, BOMB_LOB, BOW_SHOT, WEAPON_THROW,
 	BOOMERANG_THROW, PAD_PLACE, MINE_PLANT, MISSILE_FIRE, HOLE_LOB }
@@ -28,6 +30,10 @@ var rise_speed := 0
 var air_control := false
 var plunge_speed := 0
 var uses_recovery := false
+## What a hit adds (WeaponTable.EFFECT_*) and its number, from a weapon's row; none for fist moves.
+## Carried into the hit; nothing reads them yet (combat spec v0.4, batch 3).
+var effect := 0
+var effect_n := 0
 
 
 func total_frames() -> int:

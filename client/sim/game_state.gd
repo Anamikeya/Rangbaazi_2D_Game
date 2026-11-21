@@ -9,13 +9,14 @@ var random_state := 0   # SimRandom state (64-bit)
 var fighters: Array[Fighter] = []
 var match_over := false
 var winner_index := -1
-## Prop Boxes, loose weapons and projectiles: a fixed array of Weapons.MAX_PROPS.
+## Prop Boxes, loose weapons and projectiles: a fixed array, sized when the match is made
+## (Weapons.prop_slots).
 var props: Array[Prop] = []
 var prop_timer := 0      # frames until the next Prop Box drops
 var last_box_weapon := 0 # the weapon the last one held
-## Each fighter's match record with each weapon (0 is fists), for the winner's nickname:
-## [fighter * Weapons.COUNT * 3 + weapon * 3 + stat], stat 0 damage dealt to others, 1 KOs,
-## 2 sweet-spot hits.
+## Each fighter's match record, for the winner's nickname: Weapons.RECORD_INTS ints a fighter, six
+## slots of [weapon + 1 (0 is fists, so 1), damage dealt to others, KOs, sweet-spot hits] and then
+## all the damage they have done. Read it with Simulation.weapon_stat and Simulation.main_weapon.
 var weapon_stats: PackedInt32Array = []
 
 
@@ -23,9 +24,9 @@ func _init(fighter_count: int = 2, seed: int = 0) -> void:
 	random_state = seed
 	for i in fighter_count:
 		fighters.append(Fighter.new())
-	for i in Weapons.MAX_PROPS:
+	for i in Weapons.prop_slots(fighter_count):
 		props.append(Prop.new())
-	weapon_stats.resize(fighter_count * Weapons.COUNT * 3)
+	weapon_stats.resize(fighter_count * Weapons.RECORD_INTS)
 
 
 func clone() -> GameState:

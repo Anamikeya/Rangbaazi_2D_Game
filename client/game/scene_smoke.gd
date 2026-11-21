@@ -15,8 +15,31 @@ extends RefCounted
 ##   - the touch self-test read back what each finger was holding,
 ##   - the match did something (P1 pressed buttons, someone was hit) and was drawn, so a broken
 ##     input path can't pass by pressing nothing,
-##   - the engine logged no errors (e.g. a script error while drawing) during the run.
+##   - the engine logged no errors (e.g. a script error while drawing) during the run,
+##   - a room always shows the whole level (rooms v1, 2.4 and 6.4): a 15-fighter big room in four
+##     teams and an 8-fighter normal room, played by CPUs (one of them lifted far above the top for a
+##     while, so the camera pulls back), on windows of 1920 x 1080, 2400 x 1080, 1280 x 720,
+##     1728 x 1080 and 1440 x 1080, with and without the touch controls: every platform is on screen
+##     under the HUD band on every frame, the zoom never closer than the whole-level fit nor farther
+##     than 0.85 of it, and under touch the floor's top at or above TouchControls.floor_clear_y
+##     (which follows the touch buttons, so this still holds when they move),
+##   - the result panel shows with the touch controls hidden (rooms v1, 6.4 and fix 11): the scene
+##     then ends the practice match on a phone layout, and plays a room of 15 in four teams with no
+##     server behind it (drawn with the HUD strip): the controls are on while its match runs, gone
+##     on its result and while watching, and the result panel fits under the HUD band at every
+##     window size above, with practice's buttons on screen; nothing logs an error while drawing it.
+##   - Android's back never quits and never leaves a room without asking (rooms v1, 6.4 and fixes 3
+##     and 4): in a room's match it opens the match panel; on the menu it closes Settings, the
+##     fighter circle, the arena slider, and the creator (back to the circle), and on the bare menu
+##     only asks "Quit?"; in a lobby of 15 it asks "Leave the room?" and a second press takes the
+##     question away; and that lobby, laid out in four teams and as a free-for-all at every window
+##     size above, keeps Leave room, Copy link and START on screen.
 ## Fails with exit code 1 otherwise, or after TIMEOUT_MSEC.
+##
+## `-- --smoke --all-weapons` is the same run with every weapon in it: every ARM_EVERY frames each
+## fighter is handed the next weapon a crate can hold (P2 one ahead of P1), for as long as it takes
+## to go round them all. A weapon the scene can't draw, or one whose rules log a script error,
+## fails the run. Every batch of combat spec v0.4 runs it, so what is in the crates always shows.
 
 const FRAMES := 900
 const SEED := 20261108
@@ -26,6 +49,8 @@ const P2_LEVEL := SparringBot.Level.NORMAL
 ## Physics ticks per second while testing: one tick is still one sim frame, the ticks just come
 ## faster than real time (the sim doesn't care), so the check takes about 2 s instead of 15.
 const TICKS_PER_SECOND := 480
+## In the all-weapons run: frames between hand-outs.
+const ARM_EVERY := 30
 const TOUCH_FROM_FRAME := 450
 const TOUCH_TEST_FRAME := 600
 ## Fewer frames with P1 buttons held than this means the bots (or the key path) did nothing.
@@ -34,6 +59,8 @@ const MIN_PRESSED_FRAMES := 100
 const MIN_DRAWS := 30
 
 var pressed_frames := 0 # frames on which P1 held at least one button
+## The all-weapons run (`--all-weapons`): the fighters are handed every crate weapon in turn.
+var all_weapons := false
 
 var _started_msec := Time.get_ticks_msec()
 var _held := Buttons.NONE   # P1's buttons whose keys are down right now
@@ -63,7 +90,33 @@ static func requested() -> bool:
 
 
 func _init() -> void:
+	all_weapons = OS.get_cmdline_user_args().has("--all-weapons") or OS.get_cmdline_args().has("--all-weapons")
 	OS.add_logger(_errors)
+
+
+## How many frames the run plays: FRAMES, or in the all-weapons run long enough for both fighters
+## to have held every weapon.
+func frames() -> int:
+	return frame_count(all_weapons)
+
+
+static func frame_count(with_all_weapons: bool) -> int:
+	if not with_all_weapons:
+		return FRAMES
+	return maxi(FRAMES, ARM_EVERY * (Weapons.crate_list().size() + 1) + 60)
+
+
+## The all-weapons run's hand-out, before the frame's buttons are worked out: every ARM_EVERY
+## frames fighter p is given weapon (frame / ARM_EVERY + p) of the crate list, full.
+static func arm(state: GameState) -> void:
+	if state.frame % ARM_EVERY != 0:
+		return
+	var crates := Weapons.crate_list()
+	for p in state.fighters.size():
+		var f := state.fighters[p]
+		if f.is_active():
+			f.weapon = crates[(state.frame / ARM_EVERY + p) % crates.size()]
+			f.weapon_supply = Weapons.supply_of(f.weapon)
 
 
 ## Stops counting errors (call once the result is known).
@@ -166,24 +219,120 @@ func final_problem(state: GameState, rules: MatchRules, match_draws: int) -> Str
 	return ""
 
 
+## "" if the engine has logged no errors so far, else the count and the first.
+func errors_problem() -> String:
+	if _errors.count > 0:
+		return "the engine logged %d error(s), the first: %s" % [_errors.count, _errors.first]
+	return ""
+
+
 ## The errors logged so far, for a failure caused by something else (e.g. a timeout).
 func error_note() -> String:
 	return "" if _errors.count == 0 else " (and %d engine error(s), the first: %s)" % [_errors.count, _errors.first]
 
 
 func timed_out() -> bool:
-	return Time.get_ticks_msec() - _started_msec > TIMEOUT_MSEC
+	return Time.get_ticks_msec() - _started_msec > TIMEOUT_MSEC * frames() / FRAMES
 
 
 func elapsed_msec() -> int:
 	return Time.get_ticks_msec() - _started_msec
 
 
-## The checksum after FRAMES frames of the same match run straight through the sim.
-static func reference_checksum(rules: MatchRules) -> int:
+## Window sizes (physical pixels) the whole-level check uses; the game sees each as a logical size
+## (the project's 1920 x 1080 stretched with aspect "expand").
+const VIEW_WINDOWS := [Vector2(1920, 1080), Vector2(2400, 1080), Vector2(1280, 720), Vector2(1728, 1080), Vector2(1440, 1080)]
+const VIEW_FRAMES := 720
+## From frame LIFT_FROM to LIFT_TO the views see the first active fighter LIFT_Y metres up (the sim doesn't).
+const LIFT_FROM := 300
+const LIFT_TO := 420
+const LIFT_Y := 19
+
+
+static func logical_size(window: Vector2) -> Vector2:
+	return window / minf(window.x / 1920.0, window.y / 1080.0)
+
+
+## "" if a room's camera always shows the whole level, else the first frame and view where it didn't.
+static func whole_level_problem() -> String:
+	for n: int in [15, 8]:
+		var stage := StageDefinition.by_id("rooftops" if n > 8 else "shubham", StageDefinition.size_for(n))
+		if stage.size != (StageDefinition.SIZE_BIG if n > 8 else StageDefinition.SIZE_NORMAL):
+			return "view: a room of %d isn't on the level it should be" % n
+		var teams := PackedInt32Array()
+		if n > 8:
+			for i in n:
+				teams.append(1 + i / 4)
+		var rules := MatchRules.room(stage, 10, PackedInt32Array(), teams)
+		var state := Simulation.create_initial_state(rules, n, SEED)
+		var views: Array[ArenaView] = []
+		var sizes: Array[Vector2] = []
+		for window: Vector2 in VIEW_WINDOWS:
+			for touch: bool in [false, true]:
+				var v := ArenaView.new()
+				v.rules = rules
+				v.room_mode = true
+				v.touch_layout = touch
+				v.you_index = 0
+				views.append(v)
+				sizes.append(logical_size(window))
+		var inputs := PackedInt32Array()
+		inputs.resize(n)
+		var problem := ""
+		for frame in VIEW_FRAMES:
+			for p in n:
+				inputs[p] = SparringBot.think(state, rules, p, SparringBot.Level.NORMAL)
+			Simulation.advance(state, rules, inputs)
+			var shown := state
+			if frame >= LIFT_FROM and frame < LIFT_TO:
+				shown = state.clone()
+				for f in shown.fighters:
+					if f.is_active():
+						f.pos_y = Fx.from_int(LIFT_Y) # the first fighter still in
+						break
+			for k in views.size():
+				views[k].state = shown
+				problem = _view_problem(views[k], sizes[k], stage)
+				if problem != "":
+					problem = "view: %d fighters, %s window (%s logical)%s, frame %d: %s" % [n, VIEW_WINDOWS[k / 2], sizes[k],
+						" with touch" if views[k].touch_layout else "", frame, problem]
+					break
+			if problem != "":
+				break
+		for v in views:
+			v.free()
+		if problem != "":
+			return problem
+	return ""
+
+
+static func _view_problem(view: ArenaView, size: Vector2, stage: StageDefinition) -> String:
+	view.place_camera(size)
+	var cam := view.camera()
+	var ppm: float = cam[0]
+	var band: float = cam[2]
+	var fit := view.fit_ppm(size)
+	if ppm > fit + 0.001 or ppm < ArenaView.PULL_BACK * fit - 0.001:
+		return "zoom %.2f px/m outside %.2f..%.2f" % [ppm, ArenaView.PULL_BACK * fit, fit]
+	var screen := Rect2(Vector2(0, band), Vector2(size.x, size.y - band)).grow(0.5)
+	for i in stage.platforms.size():
+		var r := view.screen_rect_of(stage.platforms[i])
+		if not screen.encloses(r):
+			return "platform %d at %s is not inside %s" % [i, r, screen]
+	if view.touch_layout:
+		var floor_top := view.screen_rect_of(stage.platforms[0]).position.y
+		if floor_top > TouchControls.floor_clear_y(size) + 0.5:
+			return "the floor's top at y %.1f is under the thumbs (below %.1f)" % [floor_top, TouchControls.floor_clear_y(size)]
+	return ""
+
+
+## The checksum after the run's frames of the same match played straight through the sim.
+static func reference_checksum(rules: MatchRules, with_all_weapons := false) -> int:
 	var state := Simulation.create_initial_state(rules, 2, SEED)
 	var inputs := PackedInt32Array([0, 0])
-	for frame in FRAMES:
+	for frame in frame_count(with_all_weapons):
+		if with_all_weapons:
+			arm(state)
 		inputs[0] = SparringBot.think(state, rules, 0, P1_LEVEL)
 		inputs[1] = SparringBot.think(state, rules, 1, P2_LEVEL)
 		Simulation.advance(state, rules, inputs)

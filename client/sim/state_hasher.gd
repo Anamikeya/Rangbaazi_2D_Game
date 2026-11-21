@@ -27,6 +27,20 @@ func add_bool(b: bool) -> void:
 	add_u64(1 if b else 0)
 
 
+## PRIME to the power n, wrapping like the hash does.
+static func prime_power(n: int) -> int:
+	var r := 1
+	for i in n:
+		r *= PRIME
+	return r
+
+
+## A run of zero values, as one multiplication: a zero byte only multiplies the hash by PRIME, so
+## `count` zero values multiply it by prime_power(count * 8). Pass that product.
+func add_zeros(product: int) -> void:
+	_hash *= product
+
+
 func value() -> int:
 	return _hash
 

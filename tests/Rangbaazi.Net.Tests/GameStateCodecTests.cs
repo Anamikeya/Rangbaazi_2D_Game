@@ -99,6 +99,64 @@ public class GameStateCodecTests
         return fighters;
     }
 
+    /// <summary>
+    /// The state combat spec v0.4 added: the prop table sized by the fighter count, the six-slot
+    /// record, and the statuses. A state with every status set, a full prop table and a value in
+    /// every Prop field (the reused ones too: a shot's wear and its edge bounces) round-trips.
+    /// </summary>
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(15)]
+    public void AFullPropTableTheStatusesAndTheRecordSurviveARoundTrip(int fighters)
+    {
+        GameState state = Simulation.CreateInitialState(Rules, fighters, 7);
+        Assert.Equal(Weapons.PropSlots(fighters), state.Props.Length);
+        Assert.Equal(fighters * Weapons.RecordInts, state.WeaponStats.Length);
+        for (int i = 0; i < state.Props.Length; i++)
+            state.Props[i] = new Prop
+            {
+                Kind = PropKind.Shot, Shot = (ShotKind)(1 + i % 17), Weapon = (WeaponId)(1 + i % 107), Supply = i % 2 == 0 ? -1 : i, Owner = i % fighters,
+                OwnerClear = i % 3 == 0, Position = new FixVec2(Fix.FromInt(i), Fix.FromRatio(i, 7)), Velocity = new FixVec2(Fix.FromRatio(-i, 9), Fix.Half),
+                Grounded = i % 2 == 1, Timer = 300 + i, Age = 1000 + i, HitMask = 1 << (i % 16), Hits = i, IgnoreFighter = 1 + i % 3, IgnoreTimer = 2 + i % 5,
+            };
+        // Every flight is in the table (17 of them, from 24 slots up), the batch 5 ones with the values
+        // they reuse fields for: a speaker's facing and a decoy's pretended weapon in Supply, a gate's
+        // marks in HitMask, an anvil's hang in Timer.
+        for (int k = 1; k <= 17; k++) Assert.Contains(state.Props, p => p.Shot == (ShotKind)k);
+        int speaker = Array.FindIndex(state.Props, p => p.Shot == ShotKind.Speaker);
+        state.Props[speaker].Supply = -1;
+        int decoy = Array.FindIndex(state.Props, p => p.Shot == ShotKind.Decoy);
+        state.Props[decoy].Supply = (int)WeaponId.SwapRay;
+        int gate = Array.FindIndex(state.Props, p => p.Shot == ShotKind.Gate);
+        state.Props[gate].HitMask = (1 << 14) | 5;
+        int drop = Array.FindIndex(state.Props, p => p.Shot == ShotKind.Drop);
+        state.Props[drop].Timer = 44;
+        for (int i = 0; i < fighters; i++)
+        {
+            ref Fighter f = ref state.Fighters[i];
+            f.SlowFrames = 10 + i;
+            f.RootFrames = 20 + i;
+            f.DotFrames = 30 + i;
+            f.DotBy = 1 + (i + 1) % fighters;
+            f.DotWeapon = 73;
+            f.MarkFrames = 300 - i;
+            f.StunImmune = 150;
+            f.StunWeapon = 78 + i;
+            f.BurstShots = i;
+            f.Streak = 2 * i;
+            f.StreakTarget = 1 + i;
+        }
+        for (int i = 0; i < state.WeaponStats.Length; i++) state.WeaponStats[i] = i * 3 + 1;
+
+        byte[] bytes = Save(state);
+        Assert.Equal(GameStateCodec.SizeFor(fighters), bytes.Length);
+        GameState loaded = Load(bytes, fighters);
+        AssertSame(state, loaded);
+        Assert.Equal(state.Props, loaded.Props);
+        Assert.Equal(state.WeaponStats, loaded.WeaponStats);
+    }
+
     [Fact]
     public void LoadingTruncatedOrMismatchedBytesFails()
     {

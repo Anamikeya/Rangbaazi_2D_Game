@@ -204,3 +204,114 @@ func test_different_input_delays_still_agree() -> void:
 	check(ok and _both_running(a, b), "running (A: %s, B: %s)" % [a.end_message, b.end_message])
 	if ok and _both_running(a, b):
 		_check_in_step(a, b, "delays 1 and 3")
+
+
+## Arms the two fighters of a rollback core's match for the status test: P1 with venom darts, P2
+## with a freeze ray, facing each other on the ground.
+func _status_scene(s: GameState) -> void:
+	s.prop_timer = 1000000
+	var xs := [-Fx.from_int(3), Fx.from_int(1)]
+	var arms := [WeaponTable.VENOM_DART_LAUNCHER, WeaponTable.FREEZE_RAY]
+	for i in 2:
+		var f := s.fighters[i]
+		f.pos_x = xs[i]
+		f.pos_y = 0
+		f.vel_x = 0
+		f.vel_y = 0
+		f.grounded = true
+		f.facing = 1 if i == 0 else -1
+		f.weapon = arms[i]
+		f.weapon_supply = 100
+
+
+func _status_inputs(player: int, frame: int) -> int:
+	if player == 0:
+		return Buttons.LIGHT if frame % 100 >= 60 and frame % 100 < 62 else Buttons.NONE
+	# The opponent's beam goes on and off, and it sometimes jumps: the predictions keep missing.
+	var b := Buttons.LIGHT if frame % 60 < 40 else Buttons.NONE
+	if frame % 45 == 30:
+		b |= Buttons.JUMP
+	return b
+
+
+## The GDScript rollback core re-simulates across frames where statuses are applied (poison, chill
+## and a freeze), with the opponent's input arriving 6 frames late: once every input is known, the
+## state is exactly the one a straight run makes.
+func test_rollback_resimulates_frames_where_statuses_are_applied() -> void:
+	var rules := MatchRules.new()
+	rules.weapons = true
+	var core := RollbackCore.new(rules, 99, 0, 0, 8)
+	var reference := Simulation.create_initial_state(rules, 2, 99)
+	_status_scene(core.state)
+	_status_scene(reference)
+	var late := 6
+	var seen := {"poison": false, "chill": false, "freeze": false}
+	for f in 300:
+		if f >= late:
+			core.receive_remote(f - late, _status_inputs(1, f - late), f - late, 0)
+			core.apply_rollback()
+		core.add_local_input(_status_inputs(0, f))
+		core.advance()
+		Simulation.advance(reference, rules, PackedInt32Array([_status_inputs(0, f), _status_inputs(1, f)]))
+		seen["poison"] = seen["poison"] or reference.fighters[1].dot_frames > 0
+		seen["chill"] = seen["chill"] or reference.fighters[0].slow_frames > 0
+		seen["freeze"] = seen["freeze"] or reference.fighters[0].stun_weapon == WeaponTable.FREEZE_RAY
+	for f in range(300 - late, 300):
+		core.receive_remote(f, _status_inputs(1, f), f, 0)
+	core.apply_rollback()
+	check(core.rollback_count > 0, "the late inputs caused rollbacks")
+	check_eq(core.state.frame, reference.frame, "the same frame")
+	check_eq(core.state.checksum(), reference.checksum(), "the rolled-back state equals a straight run")
+	for k: String in seen:
+		check(seen[k], "%s happened" % k)
+
+
+func _zone_scene(s: GameState) -> void:
+	_status_scene(s)
+	s.fighters[0].weapon = WeaponTable.TOXIC_GOO_LAUNCHER
+	s.fighters[1].weapon = WeaponTable.MATKA
+
+
+func _zone_inputs(player: int, frame: int) -> int:
+	if player == 0:
+		return Buttons.LIGHT if frame % 50 == 10 else Buttons.NONE
+	# The Matka thrower presses at odd times and walks about: the predictions keep missing.
+	var b := Buttons.LIGHT if frame % 37 == 5 else Buttons.NONE
+	b |= Buttons.LEFT if frame % 90 < 30 else Buttons.NONE
+	if frame % 45 == 30:
+		b |= Buttons.JUMP
+	return b
+
+
+## The GDScript rollback core re-simulates across frames where a burst becomes a zone (the goo's
+## patch) or a wall (the Matka's), with the opponent's input arriving 6 frames late: once every input
+## is known, the state is exactly the one a straight run makes.
+func test_rollback_resimulates_frames_where_a_zone_and_a_wall_are_left() -> void:
+	var rules := MatchRules.new()
+	rules.weapons = true
+	var core := RollbackCore.new(rules, 99, 0, 0, 8)
+	var reference := Simulation.create_initial_state(rules, 2, 99)
+	_zone_scene(core.state)
+	_zone_scene(reference)
+	var late := 6
+	var seen := {"zone": false, "wall": false}
+	for f in 300:
+		if f >= late:
+			core.receive_remote(f - late, _zone_inputs(1, f - late), f - late, 0)
+			core.apply_rollback()
+		core.add_local_input(_zone_inputs(0, f))
+		core.advance()
+		Simulation.advance(reference, rules, PackedInt32Array([_zone_inputs(0, f), _zone_inputs(1, f)]))
+		for p in reference.props:
+			if p.kind == Weapons.PROP_SHOT and p.shot == Weapons.SHOT_ZONE:
+				seen["zone"] = true
+			if p.kind == Weapons.PROP_SHOT and p.shot == Weapons.SHOT_WALL:
+				seen["wall"] = true
+	for f in range(300 - late, 300):
+		core.receive_remote(f, _zone_inputs(1, f), f, 0)
+	core.apply_rollback()
+	check(core.rollback_count > 0, "the late inputs caused rollbacks")
+	check_eq(core.state.frame, reference.frame, "the same frame")
+	check_eq(core.state.checksum(), reference.checksum(), "the rolled-back state equals a straight run")
+	for k: String in seen:
+		check(seen[k], "a %s was left" % k)

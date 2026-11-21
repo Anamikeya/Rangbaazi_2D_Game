@@ -16,10 +16,21 @@ internal static class ArenaLimits
 
     /// <summary>
     /// The arena protocol version clients send as <c>v=</c>. 2 added weapons to STATE; 3 added each
-    /// fighter's last hit and main weapon. Older clients are turned away with a message to update,
-    /// instead of misreading the frames.
+    /// fighter's last hit and main weapon; 4 each prop's timer; 5 is the layout for all 100 weapons
+    /// (combat spec v0.4, section 3.4): statuses on a fighter, and a prop's 16-bit timer, owner,
+    /// supply and wear; teams and stage size in lobby and start, and in a team match the STATE
+    /// winner is the winning team's MVP (rooms v1). Older clients are turned away with a message
+    /// to update (code <c>old_client</c>), instead of misreading the frames.
     /// </summary>
-    public const int ProtocolVersion = 4;
+    public const int ProtocolVersion = 5;
+
+    /// <summary>Teams in a room (rooms v1, section 1.1): 2 to 4 of them, at most 4 members each.</summary>
+    public const int MaxTeams = 4;
+    public const int MinTeams = 2;
+    public const int MaxTeamSize = 4;
+
+    /// <summary>The fewest teams that hold this many members: 1 to 8 need 2, 9 to 12 three, 13 to 15 four.</summary>
+    public static int TeamsNeeded(int members) => Math.Max(MinTeams, (members + MaxTeamSize - 1) / MaxTeamSize);
     public const int MinMinutes = 10;
     public const int MaxMinutes = 15;
     public const int DefaultMinutes = 10;
@@ -107,6 +118,7 @@ internal static class ArenaMessages
         w.WriteNumber("you", you.Id);
         w.WriteNumber("host", room.Host?.Id ?? -1);
         w.WriteNumber("max", ArenaLimits.MaxPlayers);
+        w.WriteNumber("teams", room.TeamCount);
         w.WriteStartArray("players");
         foreach (ArenaPlayer p in room.Members)
         {
@@ -115,6 +127,8 @@ internal static class ArenaMessages
             w.WriteString("name", p.Name);
             w.WriteBoolean("cpu", p.IsBot);
             w.WriteString("character", p.Character);
+            w.WriteNumber("team", p.Team);
+            w.WriteBoolean("left", p.Left);
             w.WriteEndObject();
         }
         w.WriteEndArray();
@@ -127,14 +141,18 @@ internal static class ArenaMessages
         w.WriteNumber("minutes", room.Minutes);
         w.WriteNumber("time_limit_frames", room.Rules!.TimeLimitFrames);
         w.WriteNumber("you", you.Fighter);
+        w.WriteNumber("teams", room.TeamCount);
+        w.WriteString("size", room.Rules!.Stage.Size == StageSize.Big ? "big" : "normal");
         w.WriteStartArray("fighters");
-        foreach (ArenaPlayer p in room.Fighters)
+        for (int i = 0; i < room.Fighters.Count; i++)
         {
+            ArenaPlayer p = room.Fighters[i];
             w.WriteStartObject();
             w.WriteNumber("id", p.Id);
             w.WriteString("name", p.Name);
             w.WriteBoolean("cpu", p.IsBot);
             w.WriteString("character", p.Character);
+            w.WriteNumber("team", room.Rules!.TeamOf(i));
             w.WriteEndObject();
         }
         w.WriteEndArray();
@@ -201,7 +219,7 @@ internal readonly record struct ArenaRequest(string Type, int Number, string? Id
         }
     }
 
-    private static readonly string[] NumberKeys = { "minutes", "count", "phrase" };
+    private static readonly string[] NumberKeys = { "minutes", "count", "phrase", "team" };
 }
 
 /// <summary>
@@ -214,8 +232,23 @@ internal static class ArenaBinary
     public const byte Input = 1;
     public const byte State = 2;
     public const int HeaderBytes = 12;
-    public const int FighterBytes = 31;
-    public const int PropBytes = 13;
+    public const int FighterBytes = 34;
+    public const int PropBytes = 17;
+
+    /// <summary>The main-weapon byte of a fighter with no main weapon: an all-rounder.</summary>
+    public const int AllRounder = 127;
+
+    /// <summary>Added to the main-weapon byte for a master, and to the last-hit byte for a sweet spot.</summary>
+    public const int MasterBit = 128;
+
+    // A fighter's status bits (byte 31).
+    public const int StatusSlowed = 1;
+    public const int StatusRooted = 2;
+    public const int StatusDot = 4;        // poisoned or burning
+    public const int StatusMarked = 8;
+    public const int StatusStunImmune = 16;
+    public const int StatusHidden = 32;    // in a cloud (Simulation.IsHidden)
+    public const int StatusGuarding = 64;  // holding a guard up (Simulation.Guarding)
 
     /// <summary>Every defined button (Left to Taunt); anything else is masked off.</summary>
     public const ushort KnownButtons = (1 << 11) - 1;
@@ -242,12 +275,17 @@ internal static class ArenaBinary
     /// facing (i8), action, move, flags (1 grounded, 2 frozen by a hit, 4 attack connected, 8 Guts
     /// used, 16 air dodge used), action frame (u16), Josh, KOs, falls (u16 each), hit-stop, armor
     /// (u8), Guts timer (u16), hitstun, dodge cooldown, weapon, weapon supply (u8), the last
-    /// hit taken (u8: its weapon, +128 for a sweet spot), the hit count (u8, wrapping), and the main
-    /// weapon so far (u8: 0-12, or 15 for an all-rounder, +128 for a master). Then the props
-    /// in use: count (u8), and per prop: kind, weapon, shot kind (u8), x, y (i32 raw), facing of its
-    /// flight (i8: -1, 0, 1), and its timer (u8, capped at 255: a fuse, a mine arming, a
-    /// boomerang's leg).
-    /// Little-endian.
+    /// hit taken (u8: its weapon, +128 for a sweet spot), the hit count (u8, wrapping), the main
+    /// weapon so far (u8: a weapon id, 0 for fists, or 127 for an all-rounder, +128 for a master),
+    /// the status bits (u8: 1 slowed, 2 rooted, 4 poisoned or burning, 8 marked, 16 stun-immune,
+    /// 32 hidden in a cloud, 64 guarding), the weapon of the poison or burn (u8) and the weapon of
+    /// the hold the fighter is in (u8). 34 bytes. Then the props in use: count (u8), and per prop:
+    /// kind, weapon, shot kind (u8), x, y (i32 raw), facing of its flight (i8: -1, 0, 1), its
+    /// timer (u16: a fuse, a mine arming, a boomerang's leg, a zone's life), its owner (u8, 255
+    /// for none), its supply (i8: a speaker's facing, a decoy's pretended weapon) and its wear
+    /// (u8: the swings a breakable shot has taken). 17 bytes. A prop's age is not sent.
+    /// Little-endian. In a team match the winner byte is the winning team's MVP, or -1 for a draw
+    /// (<see cref="Simulation.TimedTeamWinner"/>); the teams themselves come in the start message.
     /// </summary>
     public static byte[] EncodeState(GameState state, MatchRules rules)
     {
@@ -288,7 +326,12 @@ internal static class ArenaBinary
             s[o + 28] = (byte)((int)f.LastHitWeapon | (f.LastHitSweet ? 128 : 0));
             s[o + 29] = (byte)f.HitCount;
             int main = Simulation.MainWeapon(state, i, out bool master);
-            s[o + 30] = (byte)((main < 0 ? 15 : main) | (master ? 128 : 0));
+            s[o + 30] = (byte)((main < 0 ? AllRounder : main) | (master ? MasterBit : 0));
+            s[o + 31] = (byte)((f.SlowFrames > 0 ? StatusSlowed : 0) | (f.RootFrames > 0 ? StatusRooted : 0) | (f.DotFrames > 0 ? StatusDot : 0)
+                | (f.MarkFrames > 0 ? StatusMarked : 0) | (f.StunImmune > 0 ? StatusStunImmune : 0)
+                | (Simulation.IsHidden(state, rules, i) ? StatusHidden : 0) | (Simulation.Guarding(in f) ? StatusGuarding : 0));
+            s[o + 32] = U8(f.DotWeapon);
+            s[o + 33] = U8(f.StunWeapon);
         }
         s[o++] = (byte)props;
         foreach (Prop p in state.Props)
@@ -300,7 +343,10 @@ internal static class ArenaBinary
             BinaryPrimitives.WriteInt32LittleEndian(s[(o + 3)..], ClampRaw(p.Position.X.Raw));
             BinaryPrimitives.WriteInt32LittleEndian(s[(o + 7)..], ClampRaw(p.Position.Y.Raw));
             s[o + 11] = (byte)(sbyte)(p.Velocity.X.Raw > 0 ? 1 : p.Velocity.X.Raw < 0 ? -1 : 0);
-            s[o + 12] = U8(p.Timer);
+            BinaryPrimitives.WriteUInt16LittleEndian(s[(o + 12)..], U16(p.Timer));
+            s[o + 14] = (byte)(p.Owner >= 0 && p.Owner < 255 ? p.Owner : 255);
+            s[o + 15] = (byte)(sbyte)Math.Clamp(p.Supply, sbyte.MinValue, sbyte.MaxValue);
+            s[o + 16] = p.Kind == PropKind.Shot ? U8(p.IgnoreFighter) : (byte)0; // on a box it is who dropped it, not wear
             o += PropBytes;
         }
         return bytes;

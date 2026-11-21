@@ -13,7 +13,12 @@ Writes client/assets/:
     shared/clips.json            the 18 shared moves
     arenas/<id>/arena.json       the painted layers, the three platform kinds and which platform uses
                                  which (in the sim's platform order, see tools/gen_arena_stages.py),
-                                 and the three hazards with a picture for each of their states
+                                 the three hazards with a picture for each of their states, and
+                                 skyTop / ground: the colours the view paints above and below the
+                                 painting (worked out by tools/arena_colours.gd, run in Godot,
+                                 which decodes the WebP layers: set GODOT to its console .exe if it
+                                 isn't the default install; without it the keys are left out and the
+                                 view falls back to sky)
     arenas/<id>/*.wbin           the arena's layer and platform images
     effects/<id>-<kind>.wbin     each fighter's hit, dodge and landing effect sprites
     index.json                   the fighters (id, name, role) and arenas (stage id, folder, name)
@@ -27,6 +32,7 @@ follow EASINGS below. Re-run after the art pack changes; it replaces client/asse
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -135,6 +141,35 @@ def import_arena(pack, folder, out_root, level):
     return sid
 
 
+def godot_exe():
+    """The Godot console executable: $GODOT, or the standard 4.7.2 install CLAUDE.md names."""
+    exe = os.environ.get("GODOT") or os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Godot-4.7.2-standard",
+                                                  "Godot_v4.7.2-stable_win64_console.exe")
+    return exe if os.path.exists(exe) else None
+
+
+def add_arena_colours(root, out_root):
+    """Writes skyTop (the main colour along the far layer's top) and ground (the foreground strip) into each
+    arena.json (rooms v1, 2.5), as tools/arena_colours.gd works them out from the layers."""
+    exe = godot_exe()
+    if exe is None:
+        print("Godot not found (set GODOT): arena.json keeps no skyTop / ground; the view falls back to sky")
+        return
+    arenas = os.path.join(out_root, "arenas")
+    run = subprocess.run([exe, "--headless", "--path", os.path.join(root, "client"), "-s", "../tools/arena_colours.gd", "--", arenas],
+                         capture_output=True, text=True, encoding="utf-8", errors="replace")
+    line = next((l for l in run.stdout.splitlines() if l.startswith("ARENA_COLOURS ")), None)
+    if line is None:
+        print("tools/arena_colours.gd printed no colours: " + run.stdout + run.stderr)
+        return
+    colours = json.loads(line[len("ARENA_COLOURS "):])
+    for sid, keys in colours.items():
+        path = os.path.join(arenas, sid, "arena.json")
+        data = json.load(open(path, encoding="utf-8"))
+        data.update(keys)
+        json.dump(data, open(path, "w", encoding="utf-8"), separators=(",", ":"))
+
+
 # Names the user set, by id (the ids and art folders keep the packs' spelling):
 #   the Portal Ghost (id "akmal") is Simran, the cat Disc Duelist (id "simran") is Aastha,
 #   the Slime Trickster (id "chandan") is Akhmal, the Precision Ace (id "artha") is Chandan.
@@ -201,6 +236,8 @@ def main():
             level = json.load(open(lp, encoding="utf-8"))
             sid = import_arena(pack, folder, out_root, level)
             arenas.append({"id": sid, "folder": folder, "title": level["title"], "owner": ARENA_OWNER.get(folder, folder)})
+
+    add_arena_colours(root, out_root)
 
     # Each fighter's hit, dodge and landing effect sprites (the game animates them itself).
     effects = os.path.join(pack, "effects")

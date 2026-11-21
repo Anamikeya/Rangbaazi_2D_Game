@@ -24,13 +24,13 @@ public static class GameStateCodec
     /// <summary>Bytes before the fighter array.</summary>
     private const int HeaderSize = 8 + 4 + 8 + 1 + 4 + 4;
 
-    /// <summary>Bytes after the fighter array: the prop timer, the last box's weapon and the props.</summary>
-    private static int PropsSize => 4 + 4 + Weapons.MaxProps * Unsafe.SizeOf<Prop>();
+    /// <summary>Bytes after the fighter array: the prop timer, the last box's weapon and the props (a table sized by the fighter count).</summary>
+    private static int PropsSize(int fighters) => 4 + 4 + Weapons.PropSlots(fighters) * Unsafe.SizeOf<Prop>();
 
-    /// <summary>Bytes of the per-weapon match record after the props.</summary>
-    private static int StatsSize(int fighters) => fighters * Weapons.Count * 3 * sizeof(int);
+    /// <summary>Bytes of the match record after the props.</summary>
+    private static int StatsSize(int fighters) => fighters * Weapons.RecordInts * sizeof(int);
 
-    public static int SizeFor(int fighters) => HeaderSize + fighters * Unsafe.SizeOf<Fighter>() + PropsSize + StatsSize(fighters);
+    public static int SizeFor(int fighters) => HeaderSize + fighters * Unsafe.SizeOf<Fighter>() + PropsSize(fighters) + StatsSize(fighters);
 
     /// <summary>Writes the state and returns its checksum.</summary>
     public static ulong Write(GameState state, in BinaryBufferWriter writer)
@@ -64,7 +64,8 @@ public static class GameStateCodec
         int fighters = reader.ReadInt32();
 
         // ReadStruct copies whatever is left without complaint, so check the size first.
-        if (fighters != state.Fighters.Length || reader.FreeCapacity != fighters * Unsafe.SizeOf<Fighter>() + PropsSize + StatsSize(fighters))
+        if (fighters != state.Fighters.Length || state.Props.Length != Weapons.PropSlots(fighters) || state.WeaponStats.Length != fighters * Weapons.RecordInts
+            || reader.FreeCapacity != fighters * Unsafe.SizeOf<Fighter>() + PropsSize(fighters) + StatsSize(fighters))
             throw new InvalidDataException(
                 $"Saved state has {fighters} fighters and {reader.FreeCapacity} bytes left; expected {state.Fighters.Length}.");
         reader.ReadStruct<Fighter>(state.Fighters);

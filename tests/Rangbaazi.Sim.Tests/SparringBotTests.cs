@@ -293,6 +293,27 @@ public class SparringBotTests
     }
 
     [Fact]
+    public void Bot_never_dodges_a_teammates_swing()
+    {
+        var teams = new MatchRules { Stage = Rules.Stage, Teams = new[] { 1, 1 } };
+        MoveData heavy = Rules.Tuning.Moves.NeutralHeavy;
+        int free = 0;
+        for (int start = 0; start < 300; start++)
+        {
+            for (int a = 0; a < heavy.Startup + heavy.Active; a++)
+            {
+                GameState s = Attacking(MoveId.NeutralHeavy, a, start + a);
+                foreach (CpuLevel level in new[] { CpuLevel.Easy, CpuLevel.Normal, CpuLevel.Hard })
+                {
+                    Assert.Equal(Buttons.None, SparringBot.Think(s, teams, 0, level) & Buttons.Dodge);
+                    if ((SparringBot.Think(s, Rules, 0, level) & Buttons.Dodge) != 0) free++;
+                }
+            }
+        }
+        Assert.True(free > 0, "with no teams the same swings are dodged");
+    }
+
+    [Fact]
     public void OnlyHardIsQuickEnoughToParryTheJab()
     {
         int hard = 0;

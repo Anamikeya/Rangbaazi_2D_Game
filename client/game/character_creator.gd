@@ -5,12 +5,23 @@ extends Control
 ## animations it uses), a name, and a live preview you can make stand, run, punch and celebrate.
 ## The result is a "mix" id (ArtLibrary.make_mix) that works anywhere a fighter's id does. Looks
 ## only: every fighter has the same moves and numbers, mixed ones included.
+##
+## Rooms v1, fix 25: the MOVES strip shows each fighter throwing a jab on a loop ("moves of <name>"),
+## not their face again; the pose chips are 88 tall; with no name typed the fighter is called after
+## its head's fighter with " Jr" (never "Custom"); while the name box is being typed in on a phone,
+## only the preview and the box show, in the top part of the screen above the keyboard. Android's
+## back and Esc go back to the circle through main.gd's back chain.
 
 signal saved(id: String)
 signal cancelled
 
-const ROWS := [["HEAD", "head"], ["HANDS", "frontHand"], ["FEET", "frontFoot"], ["MOVES", "head"]]
+## [title, the rig part each cell shows ("" = the fighter in motion)].
+const ROWS := [["HEAD", "head"], ["HANDS", "frontHand"], ["FEET", "frontFoot"], ["MOVES", ""]]
 const POSES := [["Stand", "idle"], ["Run", "run_loop"], ["Punch", "jab"], ["Heavy", "side_heavy"], ["Win", "victory_a"]]
+## The name a fighter gets when none is typed: its head's fighter's name and this.
+const NAME_SUFFIX := " Jr"
+## While typing the name on a phone, the creator fits in this top fraction of the screen.
+const COMPACT_HEIGHT := 0.42
 
 var _ids: PackedStringArray = []
 var _strips: Array[PartStrip] = []
@@ -18,6 +29,9 @@ var _preview: ArtPreview
 var _name_edit: LineEdit
 var _save: Button
 var _rng := RandomNumberGenerator.new()
+var _margin: MarginContainer
+var _full_only: Array[Control] = []
+var _compact := false
 
 
 func _ready() -> void:
@@ -28,17 +42,18 @@ func _ready() -> void:
 	for f: Dictionary in ArtLibrary.fighters():
 		_ids.append(str(f["id"]))
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_margin = MarginContainer.new()
+	_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for side in ["left", "right"]:
-		margin.add_theme_constant_override("margin_" + side, 60)
-	margin.add_theme_constant_override("margin_top", 30)
-	margin.add_theme_constant_override("margin_bottom", 30)
-	add_child(margin)
+		_margin.add_theme_constant_override("margin_" + side, 60)
+	_margin.add_theme_constant_override("margin_top", 30)
+	_margin.add_theme_constant_override("margin_bottom", 30)
+	add_child(_margin)
 	var page := VBoxContainer.new()
 	page.add_theme_constant_override("separation", 16)
-	margin.add_child(page)
-	page.add_child(_label("CREATE YOUR FIGHTER", 44, UiTheme.TEXT_DIM))
+	_margin.add_child(page)
+	var heading := UiTheme.heading("CREATE YOUR FIGHTER")
+	page.add_child(heading)
 
 	var main := HBoxContainer.new()
 	main.add_theme_constant_override("separation", 40)
@@ -47,7 +62,7 @@ func _ready() -> void:
 
 	# Left: the fighter you're making, its name, and poses to try it in.
 	var left := VBoxContainer.new()
-	left.custom_minimum_size = Vector2(560, 0)
+	left.custom_minimum_size = Vector2(680, 0)
 	left.add_theme_constant_override("separation", 14)
 	main.add_child(left)
 	_preview = ArtPreview.new()
@@ -58,6 +73,7 @@ func _ready() -> void:
 	var poses := HBoxContainer.new()
 	poses.alignment = BoxContainer.ALIGNMENT_CENTER
 	poses.add_theme_constant_override("separation", 8)
+	poses.theme = UiTheme.compact(8) # five chips at 32 px fit the column
 	left.add_child(poses)
 	var group := ButtonGroup.new()
 	for pose: Array in POSES:
@@ -67,12 +83,12 @@ func _ready() -> void:
 		chip.button_group = group
 		chip.button_pressed = pose[1] == "idle"
 		chip.focus_mode = Control.FOCUS_NONE
-		chip.custom_minimum_size = Vector2(104, 70)
-		chip.add_theme_font_size_override("font_size", 26)
+		chip.custom_minimum_size = Vector2(108, 88)
+		chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		chip.add_theme_font_size_override("font_size", 32)
 		chip.pressed.connect(func() -> void: _preview.clip = str(pose[1]))
 		poses.add_child(chip)
 	_name_edit = LineEdit.new()
-	_name_edit.placeholder_text = "FIGHTER'S NAME"
 	_name_edit.max_length = 12
 	_name_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_name_edit.custom_minimum_size = Vector2(0, 88)
@@ -100,6 +116,7 @@ func _ready() -> void:
 	bottom.alignment = BoxContainer.ALIGNMENT_CENTER
 	bottom.add_theme_constant_override("separation", 30)
 	page.add_child(bottom)
+	_full_only = [heading, poses, right, bottom]
 	var back := _button("Back", 220)
 	back.pressed.connect(func() -> void: cancelled.emit())
 	bottom.add_child(back)
@@ -122,13 +139,21 @@ func open(current: String) -> void:
 		m = PackedStringArray([base, base, base, base, ""])
 	for i in 4:
 		_strips[i].select(maxi(0, _ids.find(m[i])))
-	_name_edit.text = m[4]
+	# A name that is just the default stays untyped, so it follows the head.
+	_name_edit.text = "" if m[4] == default_name() else m[4]
 	show()
 	_refresh()
 
 
 func mix_id() -> String:
-	return ArtLibrary.make_mix(_strips[0].picked(), _strips[1].picked(), _strips[2].picked(), _strips[3].picked(), _name_edit.text)
+	var typed := GameSettings.clean_name(_name_edit.text)
+	return ArtLibrary.make_mix(_strips[0].picked(), _strips[1].picked(), _strips[2].picked(), _strips[3].picked(),
+		typed if typed != "" else default_name())
+
+
+## The name a fighter gets when none is typed: its head's fighter's name with " Jr" (at most 12).
+func default_name() -> String:
+	return GameSettings.clean_name(ArtLibrary.fighter_name(_strips[0].picked()) + NAME_SUFFIX)
 
 
 func _randomize() -> void:
@@ -140,13 +165,38 @@ func _randomize() -> void:
 func _refresh() -> void:
 	var id := mix_id()
 	_preview.fighter_id = id
+	_name_edit.placeholder_text = default_name()
 	_save.text = "Fight as %s" % ArtLibrary.fighter_name(id)
 
 
-func _unhandled_key_input(event: InputEvent) -> void:
-	if visible and event.is_action_pressed("ui_cancel"):
-		cancelled.emit()
-		get_viewport().set_input_as_handled()
+func _process(_delta: float) -> void:
+	if visible:
+		_set_compact(_typing_on_phone())
+
+
+## The name box has the focus on a phone or tablet, so the on-screen keyboard is likely up (as on
+## the menu: the app knows the keyboard's height, a mobile browser doesn't say).
+func _typing_on_phone() -> bool:
+	if not _name_edit.has_focus():
+		return false
+	if OS.has_feature("mobile") and DisplayServer.has_feature(DisplayServer.FEATURE_VIRTUAL_KEYBOARD):
+		return DisplayServer.virtual_keyboard_get_height() > 0
+	return OS.has_feature("web_android") or OS.has_feature("web_ios")
+
+
+func _set_compact(on: bool) -> void:
+	if on == _compact:
+		return
+	_compact = on
+	for c in _full_only:
+		c.visible = not on
+	_margin.set_anchor(SIDE_BOTTOM, COMPACT_HEIGHT if on else 1.0, true)
+
+
+## A tap outside the name box puts the keyboard away.
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.is_pressed() and _name_edit.has_focus():
+		_name_edit.release_focus()
 
 
 func _draw() -> void:
@@ -181,11 +231,16 @@ class PartStrip:
 
 	const CELL := 150.0
 	const LABEL := 170.0 # room on the left for the strip's title
+	const NAME_SIZE := 26 # each cell's fighter name
 
 	var title := ""
-	var part := "head" # the rig part whose picture stands for each fighter
+	## The rig part whose picture stands for each fighter; "" draws the fighter itself throwing a jab
+	## on a loop (the MOVES strip: what you pick there is how they move).
+	var part := "head"
 	var ids: PackedStringArray = []
 	var _picked := 0
+	var _painters: Dictionary = {} # id -> FighterPainter, for the moving cells
+	var _frame := 0
 	var _scroll := 0.0 # pixels the strip has slid
 	var _target := 0.0
 	var _dragging := false
@@ -215,6 +270,9 @@ class PartStrip:
 	func _process(delta: float) -> void:
 		if not is_visible_in_tree():
 			return
+		if part == "":
+			_frame += 1
+			queue_redraw()
 		if not _dragging and absf(_scroll - _target) > 0.5:
 			_scroll = lerpf(_scroll, _target, minf(1.0, delta * 12.0))
 			queue_redraw()
@@ -255,14 +313,26 @@ class PartStrip:
 			draw_rect(cell, Color(UiTheme.ACCENT, 0.22) if on else Color(1, 1, 1, 0.04))
 			if on:
 				draw_rect(cell, UiTheme.ACCENT, false, 4.0)
-			var tex := _picture(ids[i])
-			var box := Rect2(cell.position + Vector2(8, 6), Vector2(cell.size.x - 16, cell.size.y - 40))
-			if tex != null:
-				var k := minf(box.size.x / tex.get_width(), box.size.y / tex.get_height())
-				var s := Vector2(tex.get_width(), tex.get_height()) * k
-				draw_texture_rect(tex, Rect2(box.position + (box.size - s) / 2.0, s), false)
-			draw_string(font, Vector2(cell.position.x, cell.end.y - 10), ArtLibrary.fighter_name(ids[i]),
-				HORIZONTAL_ALIGNMENT_CENTER, cell.size.x, 22, UiTheme.ACCENT if on else UiTheme.TEXT_DIM)
+			var colour := UiTheme.ACCENT if on else UiTheme.TEXT_DIM
+			if part == "":
+				# The fighter throwing a jab on a loop, labelled "moves of <name>".
+				var painter: FighterPainter = _painters.get(ids[i])
+				if painter == null:
+					painter = FighterPainter.new(ids[i])
+					_painters[ids[i]] = painter
+				var feet := Vector2(cell.get_center().x, cell.end.y - 58)
+				painter.draw(self, feet, (cell.size.y - 70) / 210.0, 1, "jab", _frame + i * 5)
+				draw_string(font, Vector2(cell.position.x, cell.end.y - 36), "moves of", HORIZONTAL_ALIGNMENT_CENTER,
+					cell.size.x, 20, colour)
+			else:
+				var tex := _picture(ids[i])
+				var box := Rect2(cell.position + Vector2(8, 6), Vector2(cell.size.x - 16, cell.size.y - 44))
+				if tex != null:
+					var k := minf(box.size.x / tex.get_width(), box.size.y / tex.get_height())
+					var s := Vector2(tex.get_width(), tex.get_height()) * k
+					draw_texture_rect(tex, Rect2(box.position + (box.size - s) / 2.0, s), false)
+			draw_string(font, Vector2(cell.position.x, cell.end.y - 8), ArtLibrary.fighter_name(ids[i]),
+				HORIZONTAL_ALIGNMENT_CENTER, cell.size.x, NAME_SIZE, colour)
 		# The title sits over the left end, on its own dark block.
 		draw_rect(Rect2(0, 0, LABEL, size.y), Color(0.07, 0.06, 0.1))
 		draw_string(font, Vector2(0, size.y / 2.0 + 12), title, HORIZONTAL_ALIGNMENT_CENTER, LABEL, 34, UiTheme.TEXT)

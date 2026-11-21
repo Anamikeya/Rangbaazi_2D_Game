@@ -3,50 +3,6 @@ using Rangbaazi.Sim.FixedMath;
 
 namespace Rangbaazi.Sim;
 
-/// <summary>The weapons (docs/design/combat-spec-v0.3-weapons.md). 0 is empty-handed.</summary>
-public enum WeaponId : byte
-{
-    None,
-    Belan,
-    BaseballBat,
-    BowlingBall,
-    Shotgun,
-    Uzi,
-    CherryBombs,
-    Bow,
-    Boomerang,
-    Trampoline,
-    Mines,
-    HomingMissile,
-    BlackHoleBomb,
-}
-
-/// <summary>What a projectile prop is.</summary>
-public enum ShotKind : byte
-{
-    None,
-    /// <summary>The bowling ball rolling along the ground; it passes through the fighters it hits.</summary>
-    Roll,
-    /// <summary>An Uzi bullet: straight and fast, through platforms, gone on its first hit.</summary>
-    Bullet,
-    /// <summary>A lobbed cherry bomb with a fuse.</summary>
-    Bomb,
-    /// <summary>A bow's arrow: fast, dips a little, pierces through everyone it hits.</summary>
-    Arrow,
-    /// <summary>A thrown weapon: it hits once, or lands, and is gone.</summary>
-    Thrown,
-    /// <summary>A boomerang: flies out, slows, and comes back to its thrower's hand, hitting on both legs.</summary>
-    Boomerang,
-    /// <summary>A trampoline lying on the stage: anyone touching it is bounced up. It never hits.</summary>
-    Pad,
-    /// <summary>A planted mine: armed after a moment, it bursts on anyone who touches it.</summary>
-    Mine,
-    /// <summary>A homing missile: slow, it steers at the nearest fighter who isn't its owner, and bursts.</summary>
-    Missile,
-    /// <summary>A black-hole bomb: it lands, pulls everyone near it in, then bursts.</summary>
-    Hole,
-}
-
 public enum PropKind : byte
 {
     None,
@@ -69,18 +25,18 @@ public struct Prop
     public PropKind Kind;
     public WeaponId Weapon;
     public ShotKind Shot;
-    public int Supply;          // ammo or durability the weapon carries
+    public int Supply;          // ammo or durability the weapon carries (a box flung by a swing carries it as a thrown shot); a speaker's facing; the weapon a decoy pretends to hold
     public int Owner;           // the fighter who fired or threw it, or -1
     public bool OwnerClear;     // the release grace is over: it can hit its owner now
     public FixVec2 Position;
     public FixVec2 Velocity;
     public bool Grounded;
-    public int Timer;           // frames: age of a box or item, fuse of a bomb, mine or pad, wait of a pending box; a boomerang's leg (0 out, 1 back)
+    public int Timer;           // frames: age of a box or item, fuse of a bomb, arming of a mine or trap, life left of a pad, zone, wall, speaker, gate or decoy, an anvil's hang, wait of a pending box; a boomerang's leg (0 out, 1 back)
     public int Age;             // frames in flight
-    public int HitMask;         // one bit per fighter already hit
+    public int HitMask;         // one bit per fighter already hit (a gate: per fighter it has sent through and who still touches it)
     public int Hits;            // fighters hit by this shot so far
-    public int IgnoreFighter;   // 1 + the fighter who just dropped it, or 0
-    public int IgnoreTimer;
+    public int IgnoreFighter;   // a box or item: 1 + the fighter who just dropped it, or 0. A shot: swings a breakable prop has taken (its wear)
+    public int IgnoreTimer;     // a box or item: frames left of that. A shot: screen-edge bounces done
 
     internal readonly void AddTo(ref StateHasher h)
     {
@@ -104,32 +60,40 @@ public struct Prop
     }
 }
 
-/// <summary>One weapon's fixed data. Immutable, outside the rollback state.</summary>
-public sealed class WeaponData
-{
-    public required WeaponId Id { get; init; }
-
-    /// <summary>The attack: <see cref="MoveId"/> of its frame data in <see cref="WeaponMoves"/>.</summary>
-    public required MoveId Move { get; init; }
-
-    /// <summary>Ammo (shots) or durability (hits that connect) a fresh weapon carries.</summary>
-    public required int Supply { get; init; }
-
-    /// <summary>The projectile its attack fires at the move's startup frame, or None for melee.</summary>
-    public ShotKind Fires { get; init; }
-
-    /// <summary>Damage when thrown: light 6, medium 9, heavy 12.</summary>
-    public int ThrowDamage { get; init; } = 9;
-}
-
 /// <summary>
-/// The weapon catalogue, the weapons' moves and the props' rules. Shared by every fighter; numbers
-/// are first guesses for playtests (combat spec v0.3).
+/// The props' rules and the numbers every weapon shares. A weapon's own numbers are a row of the
+/// generated <see cref="WeaponTable"/> (tools/weapons.json; combat spec v0.4): the engine reads the
+/// row's columns and never asks which weapon it is.
 /// </summary>
 public static class Weapons
 {
-    public const int Count = 13; // None plus twelve weapons
-    public const int MaxProps = 16;
+    /// <summary>Rows in the table: the empty row 0, the weapons, and the hidden rows that are parts of weapons.</summary>
+    public const int Count = WeaponTable.Count;
+
+    /// <summary>
+    /// The match record (<see cref="GameState.WeaponStats"/>): each fighter has this many slots of
+    /// <see cref="RecordSlotInts"/> ints, [weapon + 1, damage, KOs, sweet spots], then one int, all
+    /// the damage they have done to others. A slot whose first int is 0 is empty.
+    /// </summary>
+    public const int RecordSlots = 6;
+    public const int RecordSlotInts = 4;
+    public const int RecordInts = RecordSlots * RecordSlotInts + 1;
+
+    /// <summary>The prop table of a match: 16 slots and 4 more per fighter, up to 64.</summary>
+    public static int PropSlots(int fighters) => Math32.Min(64, 16 + 4 * fighters);
+
+    /// <summary>
+    /// The first slots of the table are kept for boxes, pending boxes and loose weapons: shots only
+    /// use the slots after them, so crates keep dropping and a dead fighter's weapon always comes
+    /// back, however many shots are out.
+    /// </summary>
+    public static int BoxSlots(int fighters) => Cap(fighters) + 2;
+
+    /// <summary>
+    /// The most placed props (pads, mines: the flights with the placed flag) one fighter can have
+    /// out: 4, or 2 in a match of more than 8. Placing one more removes their oldest.
+    /// </summary>
+    public static int PlacedLimit(int fighters) => fighters > 8 ? 2 : 4;
 
     // Prop Boxes: fast, because the game is fast.
     public const int FirstBoxFrames = 90;        // 1.5 s into the match
@@ -148,99 +112,150 @@ public static class Weapons
     /// <summary>At most this many boxes and loose weapons at once: 3 + 1 per 2 fighters, up to 8.</summary>
     public static int Cap(int fighters) => Math32.Min(8, 3 + fighters / 2);
 
-    // Projectiles.
-    public static readonly Fix ShotGravity = Fix.FromRatio(1, 100);
-    public static readonly Fix ArrowGravity = Fix.FromRatio(4, 1000);
+    // Shared by every projectile.
+    public static readonly Fix ShotGravity = Fix.FromRatio(1, 100);      // props lying or rolling on the stage
     public static readonly Fix MaxFall = Fix.FromRatio(30, 100);
-    public static readonly Fix RollSpeed = Fix.FromRatio(22, 100);
-    public const int RollFrames = 180;
-    public static readonly Fix BulletSpeed = Fix.FromRatio(70, 100);
-    public const int BulletFrames = 20;
-    public const int UziInterval = 5;
-    public static readonly Fix BombVx = Fix.FromRatio(14, 100);
-    public static readonly Fix BombVy = Fix.FromRatio(18, 100);
-    public const int BombFuse = 50;
-    public static readonly Fix BlastHalf = Fix.FromRatio(6, 5);          // a 2.4 m blast
-    public static readonly Fix ArrowSpeed = Fix.FromRatio(55, 100);
-    public const int ArrowFrames = 50;
-    public const int LongShotFrames = 20;                                // an arrow that flew 11 m+ is a long shot
+    public static readonly Fix GroundBrake = Fix.FromRatio(2, 100);      // a landed bomb slides to a stop
     public static readonly Fix ThrowVx = Fix.FromRatio(32, 100);
     public static readonly Fix ThrowVy = Fix.FromRatio(6, 100);
+    public static readonly Fix ThrownHalf = Fix.FromRatio(3, 10);        // a thrown weapon's box is 0.6 m
     public static readonly Fix HandHeight = Fix.One;
     public static readonly Fix HandReach = Fix.FromRatio(3, 5);
-    public static readonly Fix ShotgunFar = Fix.FromInt(3);              // beyond this the blast does 10
-    public static readonly Fix PointBlank = Fix.FromRatio(6, 5);         // the shotgun's sweet spot
-    public static readonly Fix BatTip = Fix.FromRatio(13, 10);           // the bat's sweet spot
-    public const int ShotgunFarDamage = 10;
-    public const int UziStreakSweet = 6;
+    public static readonly Fix BoomerangClimb = Fix.FromRatio(12, 100);  // how fast a boomerang rises or sinks to the hand
+    public static readonly Fix MissileLevel = Fix.FromRatio(1, 5);       // within this height of its target a missile flies level
+    public static readonly Fix BounceMin = Fix.FromRatio(8, 100);        // a bouncing shot leaves the floor at least this fast
+    public static readonly Fix ScreenInset = Fix.FromRatio(6, 5);        // the screen's sides are this far inside the side blast lines
+    public static readonly Fix PullStop = Fix.One;                       // a spray's pull stops this far in front of the wielder
 
-    // The boomerang: 10 m out in 40 frames, then back to the hand.
-    public static readonly Fix BoomerangSpeed = Fix.FromRatio(50, 100);
-    public static readonly Fix BoomerangDrag = Fix.FromRatio(125, 10000);
-    public static readonly Fix BoomerangClimb = Fix.FromRatio(12, 100);  // how fast it rises or sinks to the hand
-    public const int BoomerangFrames = 150;                              // uncaught by then, it drops and lies there
+    // Statuses (combat spec v0.4, section 2.4).
+    public const int SlowCapFrames = 150;       // slow (and chill) adds up to 2.5 s
+    public const int FreezeAt = 90;             // chill of this much on someone standing freezes them
+    public const int FreezeFrames = 60;         // frozen solid for 1 s
+    public const int FreezeImmuneFrames = 210;  // and then can't be held for 2.5 s more
+    public const int HoldImmuneFrames = 90;     // after a root or stun ends, 1.5 s before another can take
+    public const int RootPressFrames = 12;      // each fresh attack press cuts a root this much
+    public const int MarkPercent = 125;         // a marked fighter takes 25% more damage
+    public const int DotDamage = 1;             // a poison or burn tick
+    public const int AirDriftPercent = 60;      // a spray's drift on someone in the air is capped at this much of air speed
 
-    // The trampoline: lies for 10 s and bounces anyone on it 0.42 m/frame up.
-    public const int PadFrames = 600;
-    public static readonly Fix PadLaunch = Fix.FromRatio(42, 100);
+    // Guards, traps, zones and walls (combat spec v0.4, sections 2.7 and 2.8).
+    public const int GuardFrom = 2;             // a guard covers the front from this frame of its move to the end of its startup
+    public const int HoldMaxFrames = 90;        // the Parat's guard waits on its last startup frame for at most this long
+    public static readonly Fix BlockPush = Fix.FromRatio(12, 100);       // a blocked attacker is pushed back this fast
+    public static readonly Fix SlipSpeed = Fix.FromRatio(30, 100);       // a slip slides the way the fighter faces, then friction stops it
+    public static readonly Fix SlipRunSpeed = Fix.FromRatio(5, 100);     // a puddle slips whoever crosses it faster than this
+    public static readonly Fix WallPush = Fix.FromRatio(1, 5);           // a wall moves a fighter out by at most this much a frame
+    public static readonly Fix ScoopPullTo = Fix.FromRatio(6, 5);        // the rake drags boxes and loose weapons to this far in front
+    public static readonly Fix HiddenSeen = Fix.FromInt(2);              // the CPU still sees a fighter hidden in a cloud this close
 
-    // Mines: armed 0.75 s after planting; one nobody found bursts by itself after 15 s.
-    public const int MineArmFrames = 45;
-    public const int MineFrames = 900;
+    // Machines and position tricks (combat spec v0.4, section 2.9).
+    public static readonly Fix DropAhead = Fix.FromInt(4);               // the anvil hangs this far in front of its wielder (with nobody to aim at) ...
+    public static readonly Fix DropHeight = Fix.FromInt(9);              // ... this high above their feet ...
+    public static readonly Fix BlastMargin = Fix.FromInt(2);             // ... and at least this far inside the blast lines, as a box is
+    public static readonly Fix DropMin = Fix.FromInt(2);                 // its mark is over the nearest opponent in front, where they will be, but no nearer than this ...
+    public static readonly Fix DropMax = Fix.FromInt(6);                 // ... and no further than this ahead
+    public static readonly Fix DropSeek = Fix.FromInt(8);                // it aims at an opponent at most this far in front
+    public const int DropLead = 40;                                      // frames ahead it guesses where they will be (their speed times this)
+    public static readonly Fix PulseHeight = Fix.FromInt(2);             // a speaker's pulse is its reach long and this high
+    public static readonly Fix SafeMargin = Fix.FromInt(2);              // a safe spot is this far inside the blast zone on every side ...
+    public static readonly Fix SafeDrop = Fix.FromInt(4);                // ... with a platform top at most this far below it
+    public static readonly Fix BlinkMin = Fix.FromInt(2);                // the Teleporter tries its reach, then 1 m less each time, down to this
+    public static readonly Fix BlinkHeight = Fix.FromInt(6);             // onto a platform top at most this far above or below the feet
+    public static readonly Fix BlinkAbove = Fix.Half;                    // the upward blink only takes tops more than this above the feet
 
-    // The homing missile: slow, turning a little each frame, bursting after 4 s.
-    public static readonly Fix MissileSpeed = Fix.FromRatio(20, 100);
-    public static readonly Fix MissileTurn = Fix.FromRatio(8, 1000);
-    public static readonly Fix MissileLevel = Fix.FromRatio(1, 5);       // within this height of its target it flies level
-    public const int MissileFrames = 240;
+    /// <summary>
+    /// Frames a shot starts with in <see cref="Prop.Timer"/>: a speaker, gate or decoy counts its
+    /// life down there; every other flight starts at its row's fuse (a mine's arming, a pad's life,
+    /// an anvil's hang).
+    /// </summary>
+    public static int StartTimer(WeaponRow row) =>
+        row.Flight == ShotKind.Speaker || row.Flight == ShotKind.Gate || row.Flight == ShotKind.Decoy ? row.Life : row.Fuse;
 
-    // The black-hole bomb: a 110-frame fuse; for the last 80 it pulls everyone within 4.5 m.
-    public const int HoleFuse = 110;
-    public const int HolePullFrames = 80;
-    public static readonly Fix HoleReach = Fix.FromRatio(9, 2);
-    public static readonly Fix HolePull = Fix.FromRatio(11, 100);       // a little under run speed: running away just gets you out
-    public static readonly Fix HoleBlastHalf = Fix.FromRatio(21, 10);    // a 4.2 m burst
+    /// <summary>The most props of this flight one fighter can have out (one speaker, a pair of gates), or 0 for no limit of its own.</summary>
+    public static int FlightLimit(ShotKind flight) => flight == ShotKind.Speaker ? 1 : flight == ShotKind.Gate ? 2 : 0;
 
-    /// <summary>The Uzi's fixed spread pattern (vertical speed per shot): 0, +3, -3, +6, -6 degrees.</summary>
-    private static readonly Fix[] UziSpread =
+    /// <summary>The weapon a decoy pretends to hold: the last real box's, or the Belan if none has dropped yet.</summary>
+    public static WeaponId DecoyLooks(GameState state) => state.LastBoxWeapon != WeaponId.None ? state.LastBoxWeapon : WeaponId.Belan;
+
+    /// <summary>A row by weapon id (row 0 is the empty hand).</summary>
+    public static WeaponRow Get(WeaponId id) => WeaponTable.Rows[(int)id];
+
+    /// <summary>The built weapons a crate can hold, in id order.</summary>
+    public static readonly WeaponId[] CrateList = BuildCrateList();
+
+    private static WeaponId[] BuildCrateList()
     {
-        Fix.Zero, Fix.FromRatio(366, 10000), Fix.FromRatio(-366, 10000), Fix.FromRatio(732, 10000), Fix.FromRatio(-732, 10000),
-    };
+        int n = 0;
+        foreach (WeaponRow r in WeaponTable.Rows)
+            if (r.Built && r.Crate) n++;
+        var list = new WeaponId[n];
+        n = 0;
+        foreach (WeaponRow r in WeaponTable.Rows)
+            if (r.Built && r.Crate) list[n++] = r.Id;
+        return list;
+    }
 
-    public static Fix UziSpreadAt(int shot) => UziSpread[shot % UziSpread.Length];
+    private static readonly WeaponRow?[] MoveRows = BuildMoveRows();
+
+    private static WeaponRow?[] BuildMoveRows()
+    {
+        var rows = new WeaponRow?[256];
+        for (int i = 1; i < WeaponTable.Rows.Length; i++) rows[(int)WeaponTable.Rows[i].Move] = WeaponTable.Rows[i];
+        return rows;
+    }
+
+    /// <summary>The row whose attack this move is; null for the fist moves and for <see cref="MoveId.WeaponThrow"/>.</summary>
+    public static WeaponRow? RowOfMove(MoveId move) => MoveRows[(int)move];
+
+    private static readonly WeaponRow?[] FlightRows = BuildFlightRows();
+
+    private static WeaponRow?[] BuildFlightRows()
+    {
+        var rows = new WeaponRow?[256];
+        for (int i = WeaponTable.Rows.Length - 1; i >= 1; i--)
+            if (WeaponTable.Rows[i].Flight != ShotKind.None) rows[(int)WeaponTable.Rows[i].Flight] = WeaponTable.Rows[i];
+        return rows;
+    }
+
+    /// <summary>The flight a burst of this row leaves behind, or None.</summary>
+    public static ShotKind LeftFlight(WeaponRow row) =>
+        row.Leaves == WeaponLeaves.Zone ? ShotKind.Zone
+        : row.Leaves == WeaponLeaves.Wall ? ShotKind.Wall
+        : row.Leaves == WeaponLeaves.Pad ? ShotKind.Pad : ShotKind.None;
+
+    /// <summary>
+    /// The row a shot prop takes its numbers from: the row of the weapon it carries. A thrown
+    /// weapon (thrown, or flung by a swing) is a plain <c>thrown</c> prop and takes none of its
+    /// weapon's shot columns: it gets the empty row 0, so it can't be broken, bounce off the screen
+    /// edge or pass its thrower because of what it carries; its damage is its row's <c>throw</c>
+    /// and its size <see cref="ThrownHalf"/>. A shot whose weapon doesn't fly that way (only a
+    /// weapon changed in the middle of its move makes one) takes them from the first row in the
+    /// table that does.
+    /// </summary>
+    public static WeaponRow ShotRow(in Prop p)
+    {
+        if (p.Shot == ShotKind.Thrown) return WeaponTable.Rows[0];
+        WeaponRow row = WeaponTable.Rows[(int)p.Weapon];
+        if (row.Flight == p.Shot || (row.Leaves != WeaponLeaves.None && LeftFlight(row) == p.Shot)) return row;
+        return FlightRows[(int)p.Shot] ?? row;
+    }
+
+    /// <summary>
+    /// A shot prop that swings and bursts break (its row's <c>brk</c>): the trap, the orb, or what a
+    /// burst left behind (the Matka's wall). A bomb that will leave a breakable wall is not itself breakable.
+    /// </summary>
+    public static bool Breakable(in Prop p)
+    {
+        if (p.Kind != PropKind.Shot) return false;
+        WeaponRow row = ShotRow(in p);
+        return row.Break > 0 && (row.Leaves == WeaponLeaves.None || LeftFlight(row) == p.Shot);
+    }
+
+    /// <summary>The weapon a prop's hits, KOs and record are credited to: a hidden row's weapon, else its own.</summary>
+    public static WeaponId CreditOf(in Prop p) => WeaponTable.Rows[(int)p.Weapon].Credit;
 
     /// <summary>Half the width (and half the height) of a shot's box.</summary>
-    public static Fix ShotHalf(ShotKind s) => s switch
-    {
-        ShotKind.Roll => Fix.FromRatio(3, 10),
-        ShotKind.Bullet => Fix.FromRatio(3, 20),
-        ShotKind.Bomb => Fix.FromRatio(1, 5),
-        ShotKind.Arrow => Fix.FromRatio(1, 4),
-        ShotKind.Pad => Fix.FromRatio(9, 20),
-        ShotKind.Mine => Fix.FromRatio(1, 4),
-        ShotKind.Missile => Fix.FromRatio(1, 4),
-        ShotKind.Hole => Fix.FromRatio(1, 4),
-        _ => Fix.FromRatio(3, 10),
-    };
-
-    private static readonly WeaponData[] Catalogue =
-    {
-        new() { Id = WeaponId.None, Move = MoveId.None, Supply = 0 },
-        new() { Id = WeaponId.Belan, Move = MoveId.BelanBonk, Supply = 12, ThrowDamage = 6 },
-        new() { Id = WeaponId.BaseballBat, Move = MoveId.BatSwing, Supply = 8, ThrowDamage = 9 },
-        new() { Id = WeaponId.BowlingBall, Move = MoveId.BallRoll, Supply = 1, Fires = ShotKind.Roll, ThrowDamage = 12 },
-        new() { Id = WeaponId.Shotgun, Move = MoveId.ShotgunBlast, Supply = 4, ThrowDamage = 9 },
-        new() { Id = WeaponId.Uzi, Move = MoveId.UziFire, Supply = 30, Fires = ShotKind.Bullet, ThrowDamage = 6 },
-        new() { Id = WeaponId.CherryBombs, Move = MoveId.BombLob, Supply = 3, Fires = ShotKind.Bomb, ThrowDamage = 9 },
-        new() { Id = WeaponId.Bow, Move = MoveId.BowShot, Supply = 6, Fires = ShotKind.Arrow, ThrowDamage = 6 },
-        new() { Id = WeaponId.Boomerang, Move = MoveId.BoomerangThrow, Supply = 4, Fires = ShotKind.Boomerang, ThrowDamage = 6 },
-        new() { Id = WeaponId.Trampoline, Move = MoveId.PadPlace, Supply = 3, Fires = ShotKind.Pad, ThrowDamage = 9 },
-        new() { Id = WeaponId.Mines, Move = MoveId.MinePlant, Supply = 3, Fires = ShotKind.Mine, ThrowDamage = 6 },
-        new() { Id = WeaponId.HomingMissile, Move = MoveId.MissileFire, Supply = 2, Fires = ShotKind.Missile, ThrowDamage = 12 },
-        new() { Id = WeaponId.BlackHoleBomb, Move = MoveId.HoleLob, Supply = 2, Fires = ShotKind.Hole, ThrowDamage = 9 },
-    };
-
-    public static WeaponData Get(WeaponId id) => Catalogue[(int)id];
+    public static Fix ShotHalf(in Prop p) => p.Shot == ShotKind.Thrown ? ThrownHalf : ShotRow(in p).ShotHalf;
 
     /// <summary>
     /// Each weapon's owner: the fighter who uses it best (+10% damage). The rest of the cast get
@@ -258,140 +273,15 @@ public static class Weapons
         _ => WeaponId.None,
     };
 
-    // Launch angles as unit vectors.
-    private static Fix C(int v) => Fix.FromRatio(v, 10000);
-
-    public static readonly MoveData BelanBonk = new()
-    {
-        Startup = 7, Active = 3, Recovery = 14,
-        Damage = 8, BaseKnockback = Fix.FromRatio(12, 100), KnockbackGrowth = Fix.FromRatio(25, 10000),
-        LaunchX = C(6428), LaunchY = C(7660), // 50 degrees
-        HitstunBonus = 10, // dizzy
-        HitboxNear = Fix.FromRatio(1, 5), HitboxFar = Fix.FromRatio(13, 10),
-        HitboxBottom = Fix.FromRatio(3, 5), HitboxTop = Fix.FromInt(2),
-    };
-
-    public static readonly MoveData BatSwing = new()
-    {
-        Startup = 12, Active = 4, Recovery = 20,
-        Damage = 16, BaseKnockback = Fix.FromRatio(17, 100), KnockbackGrowth = Fix.FromRatio(26, 10000),
-        LaunchX = C(8192), LaunchY = C(5736), // 35 degrees
-        HitstunBonus = 4,
-        HitboxNear = Fix.Zero, HitboxFar = Fix.FromRatio(9, 5),
-        HitboxBottom = Fix.FromRatio(2, 5), HitboxTop = Fix.FromRatio(8, 5),
-    };
-
-    public static readonly MoveData ShotgunBlast = new()
-    {
-        Startup = 12, Active = 2, Recovery = 30,
-        Damage = 18, BaseKnockback = Fix.FromRatio(20, 100), KnockbackGrowth = Fix.FromRatio(28, 10000),
-        LaunchX = C(9063), LaunchY = C(4226), // 25 degrees
-        HitstunBonus = 4,
-        HitboxNear = Fix.FromRatio(2, 5), HitboxFar = Fix.FromRatio(9, 2),
-        HitboxBottom = Fix.Half, HitboxTop = Fix.FromRatio(3, 2),
-        ImpulseFrame = 12, LungeSpeed = Fix.FromRatio(-15, 100), // the kick pushes the shooter back
-    };
-
-    public static readonly MoveData BallRoll = new()
-    {
-        Startup = 14, Active = 0, Recovery = 20,
-        Damage = 14, BaseKnockback = Fix.FromRatio(18, 100), KnockbackGrowth = Fix.FromRatio(24, 10000),
-        LaunchX = C(8660), LaunchY = C(5000), // 30 degrees
-        HitstunBonus = 4,
-    };
-
-    public static readonly MoveData UziFire = new()
-    {
-        Startup = 3, Active = 0, Recovery = 8,
-        Damage = 2, BaseKnockback = Fix.FromRatio(5, 100), KnockbackGrowth = Fix.FromRatio(5, 10000),
-        LaunchX = C(9848), LaunchY = C(1736), // 10 degrees
-        HitstunBonus = -6,
-    };
-
-    public static readonly MoveData BombLob = new()
-    {
-        Startup = 8, Active = 0, Recovery = 14,
-        Damage = 12, BaseKnockback = Fix.FromRatio(18, 100), KnockbackGrowth = Fix.FromRatio(25, 10000),
-        LaunchX = C(5000), LaunchY = C(8660), // 60 degrees, away from the blast
-        HitstunBonus = 4,
-    };
-
-    public static readonly MoveData BowShot = new()
-    {
-        Startup = 10, Active = 0, Recovery = 14,
-        Damage = 10, BaseKnockback = Fix.FromRatio(15, 100), KnockbackGrowth = Fix.FromRatio(24, 10000),
-        LaunchX = C(9397), LaunchY = C(3420), // 20 degrees
-        HitstunBonus = 2,
-    };
-
+    /// <summary>Throwing the held weapon: the one weapon move that isn't a row. Its damage is the row's <c>throw</c>.</summary>
     public static readonly MoveData WeaponThrow = new()
     {
         Startup = 6, Active = 0, Recovery = 12,
         Damage = 9, BaseKnockback = Fix.FromRatio(16, 100), KnockbackGrowth = Fix.FromRatio(26, 10000),
-        LaunchX = C(8192), LaunchY = C(5736), // 35 degrees
+        LaunchX = Fix.FromRatio(8192, 10000), LaunchY = Fix.FromRatio(5736, 10000), // 35 degrees
         HitstunBonus = 4,
     };
 
-    public static readonly MoveData BoomerangThrow = new()
-    {
-        Startup = 8, Active = 0, Recovery = 12,
-        Damage = 8, BaseKnockback = Fix.FromRatio(14, 100), KnockbackGrowth = Fix.FromRatio(22, 10000),
-        LaunchX = C(8192), LaunchY = C(5736), // 35 degrees
-        HitstunBonus = 2,
-    };
-
-    /// <summary>Putting a trampoline down. It never hits anyone.</summary>
-    public static readonly MoveData PadPlace = new()
-    {
-        Startup = 6, Active = 0, Recovery = 10,
-        LaunchX = C(8192), LaunchY = C(5736),
-    };
-
-    public static readonly MoveData MinePlant = new()
-    {
-        Startup = 6, Active = 0, Recovery = 8,
-        Damage = 16, BaseKnockback = Fix.FromRatio(20, 100), KnockbackGrowth = Fix.FromRatio(26, 10000),
-        LaunchX = C(5000), LaunchY = C(8660), // 60 degrees, away from the blast
-        HitstunBonus = 4,
-    };
-
-    public static readonly MoveData MissileFire = new()
-    {
-        Startup = 14, Active = 0, Recovery = 22,
-        Damage = 15, BaseKnockback = Fix.FromRatio(19, 100), KnockbackGrowth = Fix.FromRatio(27, 10000),
-        LaunchX = C(5000), LaunchY = C(8660), // 60 degrees, away from the blast
-        HitstunBonus = 4,
-    };
-
-    public static readonly MoveData HoleLob = new()
-    {
-        Startup = 10, Active = 0, Recovery = 16,
-        Damage = 20, BaseKnockback = Fix.FromRatio(25, 100), KnockbackGrowth = Fix.FromRatio(30, 10000),
-        LaunchX = C(3420), LaunchY = C(9397), // 70 degrees: thrown up out of the hole
-        HitstunBonus = 4,
-    };
-
-    /// <summary>The bat's sweet spot (the tip) launches flat at 20 degrees: the ring-out "six".</summary>
-    public static readonly Fix SixLaunchX = C(9397);
-    public static readonly Fix SixLaunchY = C(3420);
-
-    public static MoveData? MoveFor(MoveId id) => id switch
-    {
-        MoveId.BelanBonk => BelanBonk,
-        MoveId.BatSwing => BatSwing,
-        MoveId.ShotgunBlast => ShotgunBlast,
-        MoveId.BallRoll => BallRoll,
-        MoveId.UziFire => UziFire,
-        MoveId.BombLob => BombLob,
-        MoveId.BowShot => BowShot,
-        MoveId.WeaponThrow => WeaponThrow,
-        MoveId.BoomerangThrow => BoomerangThrow,
-        MoveId.PadPlace => PadPlace,
-        MoveId.MinePlant => MinePlant,
-        MoveId.MissileFire => MissileFire,
-        MoveId.HoleLob => HoleLob,
-        _ => null,
-    };
-
-    public static bool IsWeaponMove(MoveId id) => id >= MoveId.BelanBonk;
+    /// <summary>A weapon move's frame data: the throw's, or its row's. Null for a fist move.</summary>
+    public static MoveData? MoveFor(MoveId id) => id == MoveId.WeaponThrow ? WeaponThrow : RowOfMove(id)?.MoveData;
 }

@@ -14,24 +14,30 @@ public sealed class GameState
     public bool MatchOver;
     public int WinnerIndex = -1;
 
-    /// <summary>Prop Boxes, loose weapons and projectiles (Weapons.cs): a fixed array, cheap to copy.</summary>
-    public Prop[] Props = new Prop[Weapons.MaxProps];
+    /// <summary>
+    /// Prop Boxes, loose weapons and projectiles (Weapons.cs): a fixed array, cheap to copy, sized
+    /// when the match is made (<see cref="Weapons.PropSlots"/>).
+    /// </summary>
+    public Prop[] Props;
 
     /// <summary>Frames until the next Prop Box drops, and the weapon the last one held.</summary>
     public int PropTimer;
     public WeaponId LastBoxWeapon;
 
     /// <summary>
-    /// Each fighter's match record with each weapon (0 is fists), for the winner's nickname:
-    /// [fighter * Weapons.Count * 3 + weapon * 3 + stat], stat 0 damage dealt to others, 1 KOs,
-    /// 2 sweet-spot hits. In the rollback state so a rollback never counts a hit twice.
+    /// Each fighter's match record, for the winner's nickname: <see cref="Weapons.RecordInts"/>
+    /// ints a fighter, six slots of [weapon + 1 (0 is fists, so 1), damage dealt to others, KOs,
+    /// sweet-spot hits] and then all the damage they have done. Read it with
+    /// <see cref="Simulation.WeaponStat"/> and <see cref="Simulation.MainWeapon"/>. In the rollback
+    /// state so a rollback never counts a hit twice.
     /// </summary>
     public int[] WeaponStats;
 
     public GameState(int fighterCount, ulong seed)
     {
         Fighters = new Fighter[fighterCount];
-        WeaponStats = new int[fighterCount * Weapons.Count * 3];
+        Props = new Prop[Weapons.PropSlots(fighterCount)];
+        WeaponStats = new int[fighterCount * Weapons.RecordInts];
         Random = new SimRandom(seed);
     }
 

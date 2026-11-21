@@ -46,13 +46,32 @@ var weapons := false
 var signatures: PackedInt32Array = []
 
 
+## Each fighter's team, by fighter index: 0 is no team. Fighters on the same team never hit each
+## other (Simulation.allies). Empty or shorter: no teams. Part of the rules, not of the state: a
+## fighter's team never changes during a match.
+var teams: PackedInt32Array = []
+
+
 func signature_of(fighter: int) -> int:
 	return signatures[fighter] if fighter >= 0 and fighter < signatures.size() else Weapons.NONE
 
 
+func team_of(fighter: int) -> int:
+	return teams[fighter] if fighter >= 0 and fighter < teams.size() else 0
+
+
+## A team match: some fighter has a team. Then a timed match is won by a team
+## (Simulation.timed_team_winner).
+func has_teams() -> bool:
+	for team in teams:
+		if team != 0:
+			return true
+	return false
+
+
 ## A room match (MatchRules.Room): the timed free-for-all with weapons, rage and the hidden
 ## second wind.
-static func room(stage_def: StageDefinition, minutes: int, signature_list := PackedInt32Array()) -> MatchRules:
+static func room(stage_def: StageDefinition, minutes: int, signature_list := PackedInt32Array(), team_list := PackedInt32Array()) -> MatchRules:
 	var r := MatchRules.new()
 	r.stage = stage_def
 	r.time_limit_frames = minutes * 60 * Simulation.TICKS_PER_SECOND
@@ -62,6 +81,7 @@ static func room(stage_def: StageDefinition, minutes: int, signature_list := Pac
 	r.hazards = true
 	r.flurry = true
 	r.signatures = signature_list
+	r.teams = team_list
 	return r
 
 
@@ -77,6 +97,9 @@ func fingerprint() -> int:
 	h.add_int(signatures.size())
 	for w in signatures:
 		h.add_int(w)
+	h.add_int(teams.size())
+	for team in teams:
+		h.add_int(team)
 	tuning.add_to(h)
 	stage.add_to(h)
 	return h.value()

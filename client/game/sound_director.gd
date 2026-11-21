@@ -2,7 +2,9 @@ class_name SoundDirector
 extends Node
 ## The game's sound, from the art packs' original audio (client/audio, see tools/import_audio.py):
 ## each arena's music and ambience, each fighter's footsteps and whoosh, hits, jumps, landings,
-## parries, Guts, KOs, the last-ten-seconds warning and the winner's jingle. Presentation only: it
+## parries, Guts, KOs, the last-ten-seconds warning, the winner's jingle for the winning side (a
+## whole team in a team match) and a lose sting for the rest, and the lobby's team and copy
+## confirmations. Presentation only: it
 ## watches the GameState the scene draws (practice, duel or room alike) and plays sounds when
 ## something changes; it never changes the state. Volumes are the Music and Effects buses
 ## (GameSettings).
@@ -25,8 +27,9 @@ var _seen: Array = []
 var _seen_frame := -1
 var _was_over := false
 var _last_warn_second := -1
-var _bombs := 0 # bombs, mines, missiles and black holes out last frame: one fewer is a burst
-var _bullets := 0
+var _bursting: Array = [] # what could burst last frame (BurstWatch.snapshot)
+## The level's half width plus 1 m (BurstWatch.bursts), set by the scene: 25 on the big level.
+var arena_half := BurstWatch.ARENA_HALF
 var _crates := 0 # weapon crates resting on the stage last frame
 
 
@@ -115,8 +118,9 @@ func _stream(path: String) -> AudioStream:
 
 
 ## Plays what changed since the last frame. characters: each fighter's art id; you: the local
-## fighter (their sounds are a little louder) or -1; frames_left: the room clock, or -1.
-func observe(state: GameState, characters: PackedStringArray, you: int, frames_left: int) -> void:
+## fighter (their sounds are a little louder) or -1; frames_left: the room clock, or -1; rules: the
+## match's (for who is on whose team at the result), or null.
+func observe(state: GameState, characters: PackedStringArray, you: int, frames_left: int, rules: MatchRules = null) -> void:
 	if state == null:
 		_seen.clear()
 		_was_over = false
@@ -129,10 +133,9 @@ func observe(state: GameState, characters: PackedStringArray, you: int, frames_l
 	if fresh:
 		_seen.clear()
 		for f in state.fighters:
-			_seen.append([f.action, f.grounded, f.frozen_by_hit, f.falls, f.pos_x, f.pos_y, f.armor_frames, 0, f.weapon, f.uzi_shots])
+			_seen.append([f.action, f.grounded, f.frozen_by_hit, f.falls, f.pos_x, f.pos_y, f.armor_frames, 0, f.weapon, f.action_frame])
 		_was_over = state.match_over
-		_bombs = _count_bursting(state)
-		_bullets = _count_shots(state, Weapons.SHOT_BULLET)
+		_bursting = BurstWatch.snapshot(state)
 		_crates = _count_landed_crates(state)
 		if state.frame < START_FRAME:
 			play("pickup", -2.0, 0.8) # "READY?"
@@ -149,12 +152,22 @@ func observe(state: GameState, characters: PackedStringArray, you: int, frames_l
 		var who := characters[i] if i < characters.size() else "shahn"
 		var near := 0.0 if i == you else -5.0
 		if loud < 6 and f.is_active():
+			var firing := WeaponTable.ROWS[Weapons.row_of_move(f.move) if f.action == Fighter.Action.ATTACK else 0]
+			var release: int = firing[WeaponTable.C_S]
+			var repeats: bool = (firing[WeaponTable.C_INTERVAL] > 0 or firing[WeaponTable.C_USE] == WeaponTable.USE_SPRAY) and f.weapon != Weapons.NONE
 			if f.action == Fighter.Action.ATTACK and (s[0] != Fighter.Action.ATTACK or f.action_frame == 0):
-				if Weapons.is_weapon_move(f.move) and f.move != MoveData.Id.WEAPON_THROW and f.move != MoveData.Id.UZI_FIRE and f.weapon != Weapons.NONE:
+				# A weapon's own sound as its move starts; a repeating one is heard shot by shot instead.
+				if firing[WeaponTable.C_ID] != 0 and not repeats and f.weapon != Weapons.NONE:
 					play("weapon_%d" % f.weapon, near)
 				else:
 					foley(who, "swish", near)
 				loud += 1
+			# A repeating weapon (the Uzi, the Tommy Gun, the Minigun) plays its sound on every shot, and a
+			# spray on every tick of its stream:
+			# its move has just reached its release frame, or has looped back to it for the next one.
+			# Read from the fighter's move and frame, which a room is sent too.
+			if repeats and f.action_frame >= release and (s[0] != Fighter.Action.ATTACK or int(s[9]) < release or f.action_frame < int(s[9])):
+				play("weapon_%d" % f.weapon, near - 6.0, randf_range(0.95, 1.05))
 			if f.weapon != Weapons.NONE and f.weapon != int(s[8]) and f.action != Fighter.Action.ATTACK:
 				play("pickup", near)
 			if f.frozen_by_hit and not s[2]:
@@ -191,46 +204,70 @@ func observe(state: GameState, characters: PackedStringArray, you: int, frames_l
 		s[5] = f.pos_y
 		s[6] = f.armor_frames
 		s[8] = f.weapon
-		s[9] = f.uzi_shots
+		s[9] = f.action_frame
 
-	var bombs := _count_bursting(state)
-	if bombs < _bombs:
-		play("boom", 2.0)
-	_bombs = bombs
+	# A boom for every burst (two on one frame are one louder boom); one that only opens is a soft pop.
+	var booms := 0
+	var pops := 0
+	for b: Array in BurstWatch.bursts(_bursting, state, arena_half):
+		if bool(b[4]):
+			pops += 1
+		else:
+			booms += 1
+	if booms > 0:
+		play("boom", 2.0 + minf(4.0, booms - 1.0), randf_range(0.95, 1.05))
+	elif pops > 0:
+		play("boom", -8.0, 1.6)
+	_bursting = BurstWatch.snapshot(state)
 	# A crate thumps down.
 	var crates := _count_landed_crates(state)
 	if crates > _crates:
 		play("land", -8.0, 0.7)
 	_crates = crates
-	# Every new bullet rattles (rooms don't send the Uzi's shot count, so count bullets).
-	var bullets := _count_shots(state, Weapons.SHOT_BULLET)
-	if bullets > _bullets:
-		play("weapon_5", -6.0, randf_range(0.95, 1.05))
-	_bullets = bullets
 
 	if frames_left >= 0 and frames_left <= WARN_FRAMES and not state.match_over:
 		var second := frames_left / 60
 		if second != _last_warn_second:
 			_last_warn_second = second
 			play("warning", -4.0)
-	if state.match_over and not _was_over and state.winner_index >= 0:
+	if state.match_over and not _was_over:
+		# The result (rooms v1, polish 2): the winner's jingle for the winning side (in a team match
+		# the whole winning team) and for anyone watching; the lose sting for the rest.
 		var winner := state.winner_index
-		cheer(characters[winner] if winner < characters.size() else "shahn")
+		match result_sting(state, rules, you):
+			"win":
+				cheer(characters[winner] if winner < characters.size() else "shahn")
+			"lose":
+				lose_sting()
 	_was_over = state.match_over
 
 
-func _count_shots(state: GameState, shot: int) -> int:
-	var n := 0
-	for p in state.props:
-		if p.kind == Weapons.PROP_SHOT and p.shot == shot:
-			n += 1
-	return n
+## What this screen hears when the match ends: "win" if `you` (or a teammate of yours) won, or you
+## are watching (-1) and someone did; "lose" if the other side won; "" for a draw. Static for tests.
+static func result_sting(state: GameState, rules: MatchRules, you: int) -> String:
+	var winner := state.winner_index
+	if winner < 0:
+		return ""
+	if you < 0 or you >= state.fighters.size():
+		return "win"
+	var allied := winner == you if rules == null else Simulation.allies(rules, you, winner)
+	return "win" if allied else "lose"
 
 
-## Everything on the stage that ends in a burst.
-func _count_bursting(state: GameState) -> int:
-	return _count_shots(state, Weapons.SHOT_BOMB) + _count_shots(state, Weapons.SHOT_MINE) \
-		+ _count_shots(state, Weapons.SHOT_MISSILE) + _count_shots(state, Weapons.SHOT_HOLE)
+## The lose sting: the KO sound, low and slow (no new audio).
+func lose_sting() -> void:
+	play("ko", -3.0, 0.6)
+	play("land", -6.0, 0.55)
+
+
+## The lobby's small confirmations, from the existing UI sounds: you joined a team, the link was
+## copied.
+func team_joined() -> void:
+	play("pickup", -4.0, 1.1)
+
+
+func copied() -> void:
+	play("pickup", -6.0, 1.45)
 
 
 func _count_landed_crates(state: GameState) -> int:

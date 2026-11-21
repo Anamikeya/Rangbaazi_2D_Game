@@ -127,7 +127,13 @@ func tick(local_buttons: int) -> void:
 		else:
 			_on_peer_message(packet)
 	if phase != Phase.ENDED and ready != WebSocketPeer.STATE_OPEN:
-		_end("Couldn't reach the game server." if phase == Phase.CONNECTING else "Lost the connection to the game server.", -1)
+		# The relay's refusal text can be lost when it closes at once (see RoomSession.REFUSALS):
+		# read the close status instead.
+		var refused := closed_message(_ws.get_close_code(), room) if ready == WebSocketPeer.STATE_CLOSED else ""
+		if refused != "":
+			_end(refused, -1)
+		else:
+			_end("Couldn't reach the game server." if phase == Phase.CONNECTING else "Lost the connection to the game server.", -1)
 		return
 	if phase == Phase.RUNNING:
 		_run(local_buttons)
@@ -173,6 +179,16 @@ func _on_relay_message(text: String) -> void:
 			_end("The game server is busy. Try again in a minute.", -1)
 		"error":
 			_end("The game server refused the room: %s" % str(msg.get("message", "")), -1)
+
+
+## What a relay close status means for a duel ("" when it is no refusal): 4001 full, 4002 busy,
+## 4000 a code it refused (RelayCloseCodes), with the same words as the relay's messages.
+static func closed_message(close_code: int, room_code: String) -> String:
+	match close_code:
+		4000: return "The game server refused the room: Room code must be 4 to 8 letters or digits."
+		4001: return "Room %s already has two players. Try another code." % room_code
+		4002: return "The game server is busy. Try again in a minute."
+	return ""
 
 
 func _start_match(seed: int, slot: int) -> void:

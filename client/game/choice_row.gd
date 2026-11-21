@@ -8,6 +8,7 @@ signal picked(index: int)
 
 var _chips: Array[Button] = []
 var _group := ButtonGroup.new()
+var _locked := false
 
 
 ## A row titled `title` with one chip per option, `selected` lit. `on_pick` gets the index tapped.
@@ -43,6 +44,32 @@ static func make(title: String, options: Array, selected: int, on_pick: Callable
 func select(index: int) -> void:
 	for i in _chips.size():
 		_chips[i].set_pressed_no_signal(i == index)
+
+
+## Greys a chip out (it ignores taps) or brings it back.
+func set_enabled(index: int, on: bool) -> void:
+	if index >= 0 and index < _chips.size():
+		_chips[index].disabled = not on
+
+
+## Locks the whole row: drawn as it is, the current chip still lit, but nothing can be tapped (a
+## guest's view of the host's setting).
+func set_locked(on: bool) -> void:
+	_locked = on
+	for c in _chips:
+		c.mouse_filter = Control.MOUSE_FILTER_IGNORE if on else Control.MOUSE_FILTER_STOP
+
+
+func is_locked() -> bool:
+	return _locked
+
+
+func is_enabled(index: int) -> bool:
+	return index >= 0 and index < _chips.size() and not _chips[index].disabled
+
+
+func chip_at(index: int) -> Button:
+	return _chips[index] if index >= 0 and index < _chips.size() else null
 
 
 func selected() -> int:

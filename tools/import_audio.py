@@ -11,8 +11,15 @@ audio-manifest.json "provenance"). Writes client/audio/:
     sfx/*.wav                     hit, land, jump, KO, parry, warning, click... (v3 shared cues, v6 parry),
                                   weapon_<id>.wav for each weapon's attack and boom.wav
 with a .import beside each so Godot compresses it (QOA, about a fifth of the WAV size) and loops the
-music and ambience. Re-run after the packs' audio changes, then run Godot's --import.
+music and ambience. Which weapons, and which pack key each one is, comes from tools/weapons.json
+(the weapon table's source): every row with a `key` gets weapon_<id>.wav from the pack's
+audio/weapons/<key>-primary.wav. The hidden rows have no key and no sound of their own.
+
+A sound that was imported before keeps its .import file (Godot's uid and settings in it); only a
+new sound gets a fresh stub. Re-run after the packs' audio changes or after new weapons, then run
+Godot's --import (godot --headless --path client --import) so the new ones are filled in.
 """
+import json
 import os
 import shutil
 import sys
@@ -31,19 +38,7 @@ SFX = {
     "pickup.wav": ("round-brawler-v3", "audio/ui/pickup.wav"),
     "guts.wav": ("round-brawler-v3", "audio/ui/ignite.wav"),
     "parry.wav": ("round-brawler-v6", "audio/parry.wav"),
-    # Each weapon's attack (game weapon id: Weapons in client/sim), and the cherry bomb's burst.
-    "weapon_1.wav": ("round-brawler-v3", "audio/weapons/w011-primary.wav"),  # belan
-    "weapon_2.wav": ("round-brawler-v3", "audio/weapons/w031-primary.wav"),  # baseball bat
-    "weapon_3.wav": ("round-brawler-v3", "audio/weapons/w006-primary.wav"),  # bowling ball
-    "weapon_4.wav": ("round-brawler-v3", "audio/weapons/w061-primary.wav"),  # shotgun
-    "weapon_5.wav": ("round-brawler-v3", "audio/weapons/w005-primary.wav"),  # uzi
-    "weapon_6.wav": ("round-brawler-v3", "audio/weapons/w008-primary.wav"),  # cherry bombs
-    "weapon_7.wav": ("round-brawler-v3", "audio/weapons/w054-primary.wav"),  # bow
-    "weapon_8.wav": ("round-brawler-v3", "audio/weapons/w055-primary.wav"),  # boomerang
-    "weapon_9.wav": ("round-brawler-v3", "audio/weapons/w007-primary.wav"),  # trampoline
-    "weapon_10.wav": ("round-brawler-v3", "audio/weapons/w070-primary.wav"),  # mines
-    "weapon_11.wav": ("round-brawler-v3", "audio/weapons/w068-primary.wav"),  # homing missile
-    "weapon_12.wav": ("round-brawler-v3", "audio/weapons/w098-primary.wav"),  # black-hole bomb
+    # The cherry bomb's burst: every burst plays it. Each weapon's own sound is added in weapon_sounds().
     "boom.wav": ("round-brawler-v3", "audio/weapons/w008-secondary.wav"),
 }
 
@@ -67,11 +62,22 @@ compress/mode=2
 """
 
 
+# The .import files that were there before this run, by path: put() writes them back.
+KEPT = {}
+
+
 def put(src, dst, loop=False):
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     shutil.copyfile(src, dst)
     with open(dst + ".import", "w", encoding="utf-8", newline="\n") as f:
-        f.write(IMPORT.format(loop=1 if loop else 0))
+        f.write(KEPT.get(dst + ".import") or IMPORT.format(loop=1 if loop else 0))
+
+
+def weapon_sounds(root):
+    """weapon_<id>.wav for every row of tools/weapons.json that has a pack key (a hidden row's is empty)."""
+    with open(os.path.join(root, "tools", "weapons.json"), encoding="utf-8") as f:
+        rows = json.load(f)
+    return {f"weapon_{r['id']}.wav": ("round-brawler-v3", f"audio/weapons/{r['key']}-primary.wav") for r in rows if r.get("key")}
 
 
 def main():
@@ -80,6 +86,11 @@ def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     out = os.path.join(root, "client", "audio")
     if os.path.exists(out):
+        for d, _, fs in os.walk(out):
+            for name in fs:
+                if name.endswith(".import"):
+                    with open(os.path.join(d, name), encoding="utf-8") as f:
+                        KEPT[os.path.join(d, name)] = f.read()
         shutil.rmtree(out)
     count = 0
     audio = os.path.join(v6, "audio")
@@ -104,7 +115,7 @@ def main():
         put(os.path.join(foley, f"{fighter}.{swish}"), os.path.join(out, "foley", f"{fighter}.swish.wav"))
         put(os.path.join(foley, f"{fighter}.{step}"), os.path.join(out, "foley", f"{fighter}.step.wav"))
         count += 2
-    for name, (pack, rel) in SFX.items():
+    for name, (pack, rel) in {**SFX, **weapon_sounds(root)}.items():
         put(os.path.join(art, pack, rel), os.path.join(out, "sfx", name))
         count += 1
     size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(out) for f in fs if f.endswith(".wav"))

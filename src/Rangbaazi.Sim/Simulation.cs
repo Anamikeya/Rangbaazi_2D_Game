@@ -72,8 +72,29 @@ public sealed class MatchRules
     public WeaponId SignatureOf(int fighter) =>
         Signatures != null && fighter >= 0 && fighter < Signatures.Length ? Signatures[fighter] : WeaponId.None;
 
+    /// <summary>
+    /// Each fighter's team, by fighter index: 0 is no team. Fighters on the same team never hit each
+    /// other (<see cref="Simulation.Allies"/>). Null or shorter: no teams. Part of the rules, not of
+    /// the state: a fighter's team never changes during a match.
+    /// </summary>
+    public int[]? Teams { get; init; }
+
+    public int TeamOf(int fighter) =>
+        Teams != null && fighter >= 0 && fighter < Teams.Length ? Teams[fighter] : 0;
+
+    /// <summary>A team match: some fighter has a team. Then a timed match is won by a team (<see cref="Simulation.TimedTeamWinner"/>).</summary>
+    public bool HasTeams()
+    {
+        if (Teams == null) return false;
+        for (int i = 0; i < Teams.Length; i++)
+        {
+            if (Teams[i] != 0) return true;
+        }
+        return false;
+    }
+
     /// <summary>A room match: the timed free-for-all with weapons, rage and the hidden second wind.</summary>
-    public static MatchRules Room(StageDefinition stage, int minutes, WeaponId[]? signatures = null) => new()
+    public static MatchRules Room(StageDefinition stage, int minutes, WeaponId[]? signatures = null, int[]? teams = null) => new()
     {
         Stage = stage,
         TimeLimitFrames = minutes * 60 * Simulation.TicksPerSecond,
@@ -83,6 +104,7 @@ public sealed class MatchRules
         Hazards = true,
         Flurry = true,
         Signatures = signatures,
+        Teams = teams,
     };
 }
 
@@ -95,6 +117,14 @@ public sealed class MatchRules
 public static partial class Simulation
 {
     public const int TicksPerSecond = 60;
+
+    /// <summary>
+    /// Bumped when the sim's behaviour changes on purpose; equal to <c>Simulation.SIM_VERSION</c> in
+    /// client/sim. 8: the weapon table, prop slots by fighter count, fizzling shots, the placed-prop
+    /// limit, the statuses' state, teams, the six-slot record and weighted crates (combat spec v0.4);
+    /// team wins, big stages (rooms v1).
+    /// </summary>
+    public const int SimVersion = 8;
 
     /// <summary>Most fighters in one match: online rooms hold up to 15 players (one spare slot).</summary>
     public const int MaxFighters = 16;
@@ -129,11 +159,13 @@ public static partial class Simulation
             for (int i = 0; i < fighters.Length; i++) frozen[i] = UpdateFighter(state, ref fighters[i], i, inputs[i], rules);
             if (rules.Weapons) FireShots(state, frozen, rules);
             ResolveHits(state, frozen, rules);
+            if (rules.Weapons) Sprays(state, frozen, rules);
             if (rules.Weapons) UpdateProps(state, frozen, rules);
             if (rules.Hazards) ApplyHazards(state, rules);
             for (int i = 0; i < fighters.Length; i++)
             {
                 EndPlungeOnLanding(ref fighters[i], rules.Tuning);
+                FreeIfAirborne(ref fighters[i]);
                 if (rules.Weapons) ReturnOnFall(state, i, rules);
                 CheckBlastZone(state, i, rules);
             }
@@ -146,6 +178,17 @@ public static partial class Simulation
     /// <summary>Hit-stop for a hit of this much damage: 2 + damage / 2, clamped to the rules' range.</summary>
     public static int HitStopFrames(int damage, MatchRules rules) =>
         Math32.Clamp(2 + damage / 2, rules.MinHitStop, rules.MaxHitStop);
+
+    /// <summary>
+    /// The same fighter, or two fighters of one team (<see cref="MatchRules.TeamOf"/>, 0 is none).
+    /// Allies never hit each other; with no teams set this is just <c>a == b</c>.
+    /// </summary>
+    public static bool Allies(MatchRules rules, int a, int b)
+    {
+        if (a == b) return true;
+        int team = rules.TeamOf(a);
+        return team != 0 && team == rules.TeamOf(b);
+    }
 
     /// <summary>Dodging and not yet in the dodge's last, hittable frames.</summary>
     public static bool IsIntangible(in Fighter f, FighterTuning t) =>
@@ -209,7 +252,14 @@ public static partial class Simulation
 
         Buttons pressed = input & ~f.PreviousButtons;
         f.PreviousButtons = input;
-        TickTimers(ref f, rules);
+        TickTimers(state, ref f, index, rules);
+
+        // Each fresh attack press works a root 12 frames looser, in the middle of an attack too.
+        if (f.RootFrames > 0 && (pressed & (Buttons.Light | Buttons.Heavy)) != 0)
+        {
+            f.RootFrames = Math32.Max(0, f.RootFrames - Weapons.RootPressFrames);
+            if (f.RootFrames == 0) f.StunWeapon = 0;
+        }
 
         bool gravity = true;
         switch (f.Action)
@@ -217,7 +267,11 @@ public static partial class Simulation
             case FighterAction.Hitstun:
             case FighterAction.Stunned:
                 f.HitstunFrames--;
-                if (f.HitstunFrames <= 0) f.Action = FighterAction.Idle;
+                if (f.HitstunFrames <= 0)
+                {
+                    f.Action = FighterAction.Idle;
+                    if (f.RootFrames == 0) f.StunWeapon = 0; // a stun, freeze or slip is over
+                }
                 if (f.Grounded) f.Velocity.X = Fix.MoveToward(f.Velocity.X, Fix.Zero, t.GroundAccel);
                 break;
 
@@ -251,7 +305,13 @@ public static partial class Simulation
             f.ActionFrame = move.Startup + move.Active - 1;
     }
 
-    private static void TickTimers(ref Fighter f, MatchRules rules)
+    /// <summary>
+    /// The fighter's timers count down, statuses included (so they pause in hit-stop like the
+    /// rest). Poison or burn ticks while it runs, on every frame where (frame + index) is a
+    /// multiple of its row's <c>dotEvery</c>: the phase doesn't depend on the timer, so refreshing
+    /// it every frame neither stops the ticks nor speeds them up.
+    /// </summary>
+    private static void TickTimers(GameState state, ref Fighter f, int index, MatchRules rules)
     {
         if (f.DodgeCooldown > 0) f.DodgeCooldown--;
         if (f.ArmorFrames > 0) f.ArmorFrames--;
@@ -261,6 +321,74 @@ public static partial class Simulation
             f.Josh = Math32.Max(0, f.Josh - rules.GutsHeal);
             f.ArmorFrames = rules.GutsArmorFrames;
         }
+        if (f.SlowFrames > 0) f.SlowFrames--;
+        if (f.MarkFrames > 0) f.MarkFrames--;
+        if (f.StunImmune > 0) f.StunImmune--;
+        if (f.RootFrames > 0 && --f.RootFrames == 0) f.StunWeapon = 0;
+        if (f.DotFrames > 0)
+        {
+            if ((state.Frame + index) % WeaponTable.Rows[f.DotWeapon].DotEvery == 0) DotTick(state, ref f, index, rules);
+            if (--f.DotFrames == 0)
+            {
+                f.DotBy = 0;
+                f.DotWeapon = 0;
+            }
+        }
+    }
+
+    /// <summary>
+    /// One poison or burn tick: 1 damage, and nothing else a hit does (no knockback, hitstun,
+    /// hit-stop, rage, mark or hit count). It goes through the hidden second wind, can trigger Guts,
+    /// and goes into the poisoner's record. It takes the KO credit only when nobody else holds it,
+    /// so poison never steals a ring-out from whoever launched the victim; a fighter's own poison
+    /// never takes it.
+    /// </summary>
+    private static void DotTick(GameState state, ref Fighter f, int index, MatchRules rules)
+    {
+        int damage = Weapons.DotDamage;
+        int absorbed = Math32.Min(f.Shield, damage);
+        f.Shield -= absorbed;
+        f.Josh = Math32.Min(rules.MaxJosh, f.Josh + damage - absorbed);
+        int by = f.DotBy - 1;
+        if (by >= 0 && by != index)
+        {
+            if (f.LastHitTimer == 0 || f.LastHitBy == 0 || f.LastHitBy == f.DotBy || f.LastHitBy == index + 1)
+            {
+                f.LastHitBy = f.DotBy;
+                f.LastHitTimer = rules.KoCreditFrames;
+                f.LastHitWeapon = (WeaponId)f.DotWeapon;
+                f.LastHitSweet = false;
+            }
+            RecordHit(state, by, (WeaponId)f.DotWeapon, damage, false);
+        }
+        if (rules.Guts && !f.GutsUsed && f.Josh >= rules.GutsJosh)
+        {
+            f.GutsUsed = true;
+            f.GutsTimer = rules.GutsDelayFrames;
+        }
+    }
+
+    /// <summary>
+    /// A hold (root, stun, freeze) ends on the first frame its fighter is not on the ground:
+    /// nobody is ever held while falling. A parry's stun has no hold weapon and is left alone.
+    /// </summary>
+    private static void FreeIfAirborne(ref Fighter f)
+    {
+        if (f.Grounded || f.StunWeapon == 0 || !f.IsActive) return;
+        EndHold(ref f);
+    }
+
+    /// <summary>Ends a hold: a root, or a stun, freeze or slip (which leave the fighter Idle).</summary>
+    private static void EndHold(ref Fighter f)
+    {
+        if (f.StunWeapon == 0) return;
+        if (f.RootFrames == 0 && f.Action == FighterAction.Stunned)
+        {
+            f.Action = FighterAction.Idle;
+            f.HitstunFrames = 0;
+        }
+        f.RootFrames = 0;
+        f.StunWeapon = 0;
     }
 
     /// <summary>
@@ -276,10 +404,14 @@ public static partial class Simulation
         if (dir != 0) f.Facing = dir;
 
         Fix targetVx = dir * (f.Grounded ? t.RunSpeed : t.AirSpeed);
-        if (f.Weapon == WeaponId.BowlingBall) targetVx = targetVx * 4 / 5; // the ball is heavy
+        int carry = WeaponTable.Rows[(int)f.Weapon].Carry;
+        if (carry != 100) targetVx = targetVx * carry / 100; // a heavy weapon slows its carrier
+        if (f.SlowFrames > 0) targetVx = targetVx / 2;       // slowed: half speed
+        if (f.RootFrames > 0) targetVx = Fix.Zero;           // rooted: it can turn, not walk
         f.Velocity.X = Fix.MoveToward(f.Velocity.X, targetVx, f.Grounded ? t.GroundAccel : t.AirAccel);
 
-        if ((pressed & Buttons.Dodge) != 0 && f.DodgeCooldown == 0 && (f.Grounded || !f.AirDodgeUsed))
+        bool rooted = f.RootFrames > 0; // no jump, dodge or recovery either
+        if ((pressed & Buttons.Dodge) != 0 && !rooted && f.DodgeCooldown == 0 && (f.Grounded || !f.AirDodgeUsed))
         {
             StartDodge(ref f, input, t);
             return false;
@@ -304,7 +436,7 @@ public static partial class Simulation
         }
         if (move == MoveId.None)
         {
-            if ((pressed & Buttons.Jump) != 0) Jump(ref f, t);
+            if ((pressed & Buttons.Jump) != 0 && !rooted) Jump(ref f, t);
             return true;
         }
 
@@ -312,20 +444,26 @@ public static partial class Simulation
         f.Move = move;
         f.ActionFrame = 0;
         f.AttackConnected = false;
-        f.UziShots = 0;
+        f.BurstShots = 0;
         return AttackMotion(ref f, input, t, steer: false);
     }
 
     /// <summary>
     /// Armed, the attack buttons are one button: Light, Heavy or both fire the weapon's attack once,
-    /// or throw it when it's empty. Drop weapon throws it. Up + Heavy stays the recovery.
+    /// or throw it when it's empty. Drop weapon throws it. Up + Heavy stays the recovery. A weapon
+    /// that cycles (the Jugaad Gauntlet) has no attack of its own: each press starts the next of
+    /// its hidden rows, picked by the supply left (pull, punch, bolt, from a full one).
     /// </summary>
     private static MoveId ArmedMove(in Fighter f, Buttons input, Buttons pressed)
     {
-        if ((pressed & Buttons.Heavy) != 0 && (input & Buttons.Up) != 0) return f.RecoveryUsed ? MoveId.None : MoveId.UpHeavy;
+        if ((pressed & Buttons.Heavy) != 0 && (input & Buttons.Up) != 0) return f.RecoveryUsed || f.RootFrames > 0 ? MoveId.None : MoveId.UpHeavy;
         if ((pressed & Buttons.DropWeapon) != 0) return MoveId.WeaponThrow;
         if ((pressed & (Buttons.Light | Buttons.Heavy)) == 0) return MoveId.None;
-        return f.WeaponSupply > 0 ? Weapons.Get(f.Weapon).Move : MoveId.WeaponThrow;
+        if (f.WeaponSupply <= 0) return MoveId.WeaponThrow;
+        WeaponRow row = WeaponTable.Rows[(int)f.Weapon];
+        if (row.Use == WeaponUse.Cycle && row.CycleCount > 0)
+            return WeaponTable.Rows[row.CycleFirst + (row.CycleCount - f.WeaponSupply % row.CycleCount) % row.CycleCount].Move;
+        return row.Move;
     }
 
     private static void Jump(ref Fighter f, FighterTuning t)
@@ -348,7 +486,7 @@ public static partial class Simulation
     /// </summary>
     private static MoveId HeavyFor(in Fighter f, Buttons input, int dir)
     {
-        if ((input & Buttons.Up) != 0) return f.RecoveryUsed ? MoveId.None : MoveId.UpHeavy;
+        if ((input & Buttons.Up) != 0) return f.RecoveryUsed || f.RootFrames > 0 ? MoveId.None : MoveId.UpHeavy;
         if ((input & Buttons.Down) != 0) return f.Grounded ? MoveId.DownHeavy : MoveId.GroundSlam;
         return dir != 0 ? MoveId.SideHeavy : MoveId.NeutralHeavy;
     }
@@ -357,9 +495,30 @@ public static partial class Simulation
     {
         MoveData m = t.Moves[f.Move];
         f.ActionFrame++;
-        // The Uzi keeps firing while an attack button is held (and it has rounds).
-        if (f.Move == MoveId.UziFire && f.ActionFrame == m.Startup + Weapons.UziInterval
-            && (input & (Buttons.Light | Buttons.Heavy)) != 0 && f.WeaponSupply > 0)
+        // A repeating weapon fires again every interval while it has rounds: while an attack button
+        // is held, or until the row's burst is out whether held or not (the Burst Rifle's three),
+        // and never more than its burstMax in one hold (the Minigun overheats).
+        // A spray's stream loops through its tick while a button is held and it has supply left.
+        WeaponRow? row = Weapons.RowOfMove(f.Move);
+        bool held = (input & (Buttons.Light | Buttons.Heavy)) != 0;
+        if (row != null && row.Use == WeaponUse.Spray)
+        {
+            if (f.ActionFrame == m.Startup + m.Active && f.WeaponSupply > 0 && held) f.ActionFrame = m.Startup;
+        }
+        else if (row != null && row.Defence == WeaponDefence.Hold)
+        {
+            // The Parat: while a button is held the tray stays up, waiting on its last startup
+            // frame, for at most 90 frames (counted in BurstShots). Then the bash comes out. A tray
+            // that has spent its last supply on a block guards nothing, so it isn't held up either.
+            if (f.ActionFrame == m.Startup && held && f.BurstShots < Weapons.HoldMaxFrames && f.WeaponSupply > 0)
+            {
+                f.ActionFrame = m.Startup - 1;
+                f.BurstShots++;
+            }
+        }
+        else if (row != null && row.Interval > 0 && f.ActionFrame == m.Startup + row.Interval && f.WeaponSupply > 0
+            && (row.BurstMax == 0 || f.BurstShots < row.BurstMax)
+            && (held || f.BurstShots < row.Burst))
             f.ActionFrame = m.Startup;
         if (f.ActionFrame >= m.TotalFrames && f.FlurryNext != MoveId.None)
         {
@@ -392,17 +551,29 @@ public static partial class Simulation
             // Attacks lock steering: friction on the ground, drift kept in the air. Exceptions: a
             // move with air control steers, and a lunge brakes in the air too (more slowly than on
             // the ground), or an airborne side heavy would carry the fighter several metres.
-            if (f.Grounded && f.Move == MoveId.UziFire) // walk at half speed while firing, without turning
-                f.Velocity.X = Fix.MoveToward(f.Velocity.X, Horizontal(input) * t.RunSpeed / 2, t.GroundAccel);
+            // Slowed, a walk or an air steer is half as fast; rooted, there is no walking at all.
+            WeaponRow? row = Weapons.RowOfMove(f.Move);
+            if (f.Grounded && row != null && row.Walk) // walk at half speed while firing, without turning
+            {
+                Fix walk = Horizontal(input) * t.RunSpeed / 2;
+                if (f.SlowFrames > 0) walk = walk / 2;
+                if (f.RootFrames > 0) walk = Fix.Zero;
+                f.Velocity.X = Fix.MoveToward(f.Velocity.X, walk, t.GroundAccel);
+            }
             else if (f.Grounded) f.Velocity.X = Fix.MoveToward(f.Velocity.X, Fix.Zero, t.GroundAccel);
-            else if (m.AirControl) f.Velocity.X = Fix.MoveToward(f.Velocity.X, Horizontal(input) * t.AirSpeed, t.AirAccel);
+            else if (m.AirControl)
+            {
+                Fix toward = Horizontal(input) * t.AirSpeed;
+                if (f.SlowFrames > 0) toward = toward / 2;
+                f.Velocity.X = Fix.MoveToward(f.Velocity.X, toward, t.AirAccel);
+            }
             else if (m.LungeSpeed != Fix.Zero && f.ActionFrame > m.ImpulseFrame)
                 f.Velocity.X = Fix.MoveToward(f.Velocity.X, Fix.Zero, t.AirAccel);
         }
 
         if (f.ActionFrame == m.ImpulseFrame)
         {
-            if (m.LungeSpeed != Fix.Zero) f.Velocity.X = m.LungeSpeed * f.Facing;
+            if (m.LungeSpeed != Fix.Zero && f.RootFrames == 0) f.Velocity.X = m.LungeSpeed * f.Facing; // a rooted fighter doesn't lunge or kick
             if (m.RiseSpeed != Fix.Zero)
             {
                 f.Velocity.Y = m.RiseSpeed;
@@ -523,23 +694,32 @@ public static partial class Simulation
         f.Position = next;
     }
 
+    // What a contact of ResolveHits' collect pass is.
+    private const byte ContactHit = 0, ContactParried = 1, ContactBlocked = 2, ContactProp = 3;
+
     /// <summary>
-    /// Finds every attacker whose active hitbox touches another fighter, then applies parries and
-    /// hits. Fighters that spent this frame frozen in hit-stop don't attack: a frozen hitbox waits
-    /// until its owner moves again (this matters for an armored fighter hit mid-attack).
+    /// Finds every attacker whose active hitbox touches another fighter or a breakable prop, then
+    /// applies them, in this order across all attackers: parries, blocks, prop swings, hits
+    /// (combat spec v0.4, section 1.7). Every contact's kind is decided from the state before any
+    /// of them is applied, so two hits on one frame never depend on the fighters' indices: a guard
+    /// knocked away by one attacker still blocks another's hit of the same frame. Fighters that
+    /// spent this frame frozen in hit-stop don't attack: a frozen hitbox waits until its owner
+    /// moves again (this matters for an armored fighter hit mid-attack).
     /// </summary>
     private static void ResolveHits(GameState state, ReadOnlySpan<bool> frozen, MatchRules rules)
     {
         Fighter[] fighters = state.Fighters;
+        Prop[] props = state.Props;
         FighterTuning t = rules.Tuning;
         int n = fighters.Length;
 
-        // Collect first, apply after, so simultaneous hits trade fairly regardless of player index.
-        // Each contact records the move, because applying a parry clears the attacker's move.
-        Span<int> contactAttacker = stackalloc int[n * n];
-        Span<int> contactTarget = stackalloc int[n * n];
-        Span<byte> contactMove = stackalloc byte[n * n];
-        Span<bool> contactParried = stackalloc bool[n * n];
+        // Each contact records the move, because applying a parry clears the attacker's move. A
+        // prop contact's target is the prop's slot.
+        int most = n * (n + props.Length);
+        Span<int> contactAttacker = stackalloc int[most];
+        Span<int> contactTarget = stackalloc int[most];
+        Span<byte> contactMove = stackalloc byte[most];
+        Span<byte> contactKind = stackalloc byte[most];
         int contacts = 0;
 
         for (int a = 0; a < n; a++)
@@ -548,29 +728,204 @@ public static partial class Simulation
             if (atk.AttackConnected || frozen[a]) continue;
             if (!TryGetActiveHitbox(in atk, t, out FixRect hitbox)) continue;
 
+            WeaponRow? row = Weapons.RowOfMove(atk.Move);
+            if (row != null && row.Use == WeaponUse.Spray) continue; // a spray's stream is the Sprays pass
+            bool first = row != null && row.First;
+            bool guardBreak = row != null && row.GuardBreak;
+            Fix ax = atk.Position.X;
+
+            // Every breakable prop in the box that isn't the attacker's side's takes a swing (a
+            // `first` row only touches the wall that stops it, below).
+            if (!first)
+            {
+                for (int i = 0; i < props.Length; i++)
+                {
+                    if (!Weapons.Breakable(in props[i]) || (props[i].Owner >= 0 && Allies(rules, a, props[i].Owner))) continue;
+                    if (!hitbox.Overlaps(PropBox(in props[i]))) continue;
+                    contactAttacker[contacts] = a;
+                    contactTarget[contacts] = i;
+                    contactMove[contacts] = (byte)atk.Move;
+                    contactKind[contacts] = ContactProp;
+                    contacts++;
+                }
+            }
+
+            // A row with `first` (the Sniper Rifle) keeps only its nearest contact, by horizontal
+            // distance, the lower index on a tie. A dodging fighter was never a contact, so it
+            // doesn't shield the fighter behind it; a parrying or guarding one is, and does.
+            int firstAt = contacts;
+            Fix firstDist = Fix.Zero;
             for (int d = 0; d < n; d++)
             {
                 ref Fighter def = ref fighters[d];
-                if (d == a || !def.IsActive) continue;
+                if (Allies(rules, a, d) || !def.IsActive) continue; // nobody hits a teammate, fists included
                 if (!hitbox.Overlaps(Hurtbox(in def, t))) continue;
 
                 bool parried = InParryWindow(in def, t);
                 if (!parried && IsIntangible(in def, t)) continue; // dodged: the attack can still hit later
+                if (WallBetween(state, ax, def.Position.X, hitbox)) continue; // a wall is in the way
+                bool blocked = !parried && !guardBreak && Guarding(in def) && FacesToward(in def, ax);
+
+                if (first)
+                {
+                    Fix dist = Fix.Abs(def.Position.X - ax);
+                    if (contacts > firstAt && dist >= firstDist) continue;
+                    contacts = firstAt; // this one is nearer: it takes the place of the one kept so far
+                    firstDist = dist;
+                }
 
                 contactAttacker[contacts] = a;
                 contactTarget[contacts] = d;
                 contactMove[contacts] = (byte)atk.Move;
-                contactParried[contacts] = parried;
+                contactKind[contacts] = parried ? ContactParried : blocked ? ContactBlocked : ContactHit;
                 contacts++;
+            }
+
+            // A `first` row stops in the nearest wall on its line when nobody stands before it, and
+            // takes a swing off it (unless it is its own side's).
+            if (first)
+            {
+                int wall = NearestWall(state, ax, hitbox);
+                if (wall >= 0 && (contacts == firstAt || Fix.Abs(props[wall].Position.X - ax) < firstDist)
+                    && Weapons.Breakable(in props[wall]) && (props[wall].Owner < 0 || !Allies(rules, a, props[wall].Owner)))
+                {
+                    contacts = firstAt;
+                    contactAttacker[contacts] = a;
+                    contactTarget[contacts] = wall;
+                    contactMove[contacts] = (byte)atk.Move;
+                    contactKind[contacts] = ContactProp;
+                    contacts++;
+                }
             }
         }
 
-        // Parries before hits: an attacker who is parried by one fighter and hit by another on the
-        // same frame ends up knocked back, not just stunned.
+        // Parries before blocks before hits: an attacker who is parried by one fighter and hit by
+        // another on the same frame ends up knocked back, not just stunned.
         for (int i = 0; i < contacts; i++)
-            if (contactParried[i]) ApplyParry(ref fighters[contactAttacker[i]], ref fighters[contactTarget[i]], rules);
+            if (contactKind[i] == ContactParried) ApplyParry(ref fighters[contactAttacker[i]], ref fighters[contactTarget[i]], rules);
         for (int i = 0; i < contacts; i++)
-            if (!contactParried[i]) ApplyHit(state, contactAttacker[i], contactTarget[i], (MoveId)contactMove[i], rules);
+            if (contactKind[i] == ContactBlocked) ApplyBlock(ref fighters[contactAttacker[i]], ref fighters[contactTarget[i]], rules);
+        for (int i = 0; i < contacts; i++)
+            if (contactKind[i] == ContactProp) SwingProp(state, contactAttacker[i], contactTarget[i], (MoveId)contactMove[i]);
+        for (int i = 0; i < contacts; i++)
+            if (contactKind[i] == ContactHit) ApplyHit(state, contactAttacker[i], contactTarget[i], (MoveId)contactMove[i], rules);
+    }
+
+    /// <summary>
+    /// A guard is up: the fighter's move is a guard (or the Parat's held guard) on one of its
+    /// guarding frames, from frame 2 to the end of its startup, and its weapon has supply left
+    /// (each block costs one: a guard that has spent its last blocks nothing more). It covers the
+    /// side it faces.
+    /// </summary>
+    public static bool Guarding(in Fighter f)
+    {
+        if (f.Action != FighterAction.Attack) return false;
+        WeaponRow? row = Weapons.RowOfMove(f.Move);
+        return row != null && (row.Defence == WeaponDefence.Guard || row.Defence == WeaponDefence.Hold)
+            && f.ActionFrame >= Weapons.GuardFrom && f.ActionFrame < row.Startup
+            && (f.WeaponSupply > 0 || row.Spend == WeaponSpend.Never);
+    }
+
+    /// <summary>Whether a guard held by <paramref name="f"/> covers something at <paramref name="x"/>: on the side it faces, or exactly where it stands.</summary>
+    public static bool FacesToward(in Fighter f, Fix x) => x == f.Position.X || Fix.Sign(x - f.Position.X) == f.Facing;
+
+    /// <summary>
+    /// Whether a shot comes at a guard held by <paramref name="f"/> from the front: by the way it
+    /// moves (towards the guard's face), not by where it is, because a fast bullet is often first
+    /// seen overlapping the guard after it has passed the guard's middle. A shot with no sideways
+    /// speed is judged by where it is.
+    /// </summary>
+    public static bool ShotFromFront(in Fighter f, in Prop p) =>
+        p.Velocity.X != Fix.Zero ? Fix.Sign(p.Velocity.X) == -f.Facing : FacesToward(in f, p.Position.X);
+
+    /// <summary>
+    /// A wall stands between an attacker at <paramref name="ax"/> and a target at
+    /// <paramref name="tx"/>: its centre lies between their two x positions and its box overlaps the
+    /// attack's box. Anyone's wall stops a swing, a blast, a spray or a pulse.
+    /// </summary>
+    public static bool WallBetween(GameState state, Fix ax, Fix tx, FixRect box)
+    {
+        Fix lo = Fix.Min(ax, tx), hi = Fix.Max(ax, tx);
+        Prop[] props = state.Props;
+        for (int i = 0; i < props.Length; i++)
+        {
+            if (props[i].Kind != PropKind.Shot || props[i].Shot != ShotKind.Wall) continue;
+            Fix cx = props[i].Position.X;
+            if (cx > lo && cx < hi && box.Overlaps(PropBox(in props[i]))) return true;
+        }
+        return false;
+    }
+
+    /// <summary>The wall in a box whose centre is nearest <paramref name="ax"/> (the lower slot on a tie), or -1.</summary>
+    private static int NearestWall(GameState state, Fix ax, FixRect box)
+    {
+        Prop[] props = state.Props;
+        int best = -1;
+        Fix bestDist = Fix.Zero;
+        for (int i = 0; i < props.Length; i++)
+        {
+            if (props[i].Kind != PropKind.Shot || props[i].Shot != ShotKind.Wall || !box.Overlaps(PropBox(in props[i]))) continue;
+            Fix dist = Fix.Abs(props[i].Position.X - ax);
+            if (best < 0 || dist < bestDist)
+            {
+                best = i;
+                bestDist = dist;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// A fighter hidden in a cloud (a zone whose row <c>hides</c>): its middle is inside one. No
+    /// screen draws it, the CPU doesn't see it from more than 2 m, and a homing missile doesn't
+    /// steer at it. Worked out from the props, so it adds no state.
+    /// </summary>
+    public static bool IsHidden(GameState state, MatchRules rules, int fighter)
+    {
+        ref Fighter f = ref state.Fighters[fighter];
+        if (!f.IsActive) return false;
+        var middle = new FixVec2(f.Position.X, f.Position.Y + rules.Tuning.Height / 2);
+        Prop[] props = state.Props;
+        for (int i = 0; i < props.Length; i++)
+        {
+            if (props[i].Kind != PropKind.Shot || props[i].Shot != ShotKind.Zone || !Weapons.ShotRow(in props[i]).Hides) continue;
+            if (PropBox(in props[i]).Contains(middle)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// A swing or blast blocked by a guard: the attacker's move has connected and it is pushed back,
+    /// both freeze for the shortest hit-stop, and the guard's weapon loses one.
+    /// </summary>
+    private static void ApplyBlock(ref Fighter atk, ref Fighter def, MatchRules rules)
+    {
+        atk.AttackConnected = true;
+        atk.Velocity.X = Weapons.BlockPush * def.Facing;
+        atk.HitStop = Math32.Max(atk.HitStop, rules.MinHitStop);
+        def.HitStop = Math32.Max(def.HitStop, rules.MinHitStop);
+        GuardCost(ref def);
+    }
+
+    /// <summary>Each block, of a swing, a shot or a burst, costs the guard one of its weapon's supply.</summary>
+    private static void GuardCost(ref Fighter def)
+    {
+        if (def.WeaponSupply > 0) def.WeaponSupply--;
+    }
+
+    /// <summary>
+    /// A swing or a blast takes one swing off a breakable prop (counted in IgnoreFighter); at its
+    /// row's <c>brk</c> it is gone, without bursting. A row with <c>gbreak</c> breaks it at once.
+    /// </summary>
+    private static void SwingProp(GameState state, int attacker, int index, MoveId move)
+    {
+        ref Prop p = ref state.Props[index];
+        state.Fighters[attacker].AttackConnected = true;
+        if (!Weapons.Breakable(in p)) return; // another swing of this frame already broke it
+        WeaponRow row = Weapons.ShotRow(in p);
+        WeaponRow? swung = Weapons.RowOfMove(move);
+        p.IgnoreFighter = swung != null && swung.GuardBreak ? row.Break : p.IgnoreFighter + 1;
+        if (p.IgnoreFighter >= row.Break) p = default;
     }
 
     /// <summary>
@@ -623,8 +978,12 @@ public static partial class Simulation
         public Fix LaunchX;
         public Fix LaunchY;
         public int HitstunBonus;
-        public bool NoHitStop;       // Uzi bullets: the target doesn't freeze
+        public int Effect;           // what the hit adds (WeaponEffect) and its number
+        public int EffectN;
+        public bool NoHitStop;       // chip hits (Uzi bullets): the target doesn't freeze
         public bool MaxHitStop;      // sweet spots always freeze the longest
+        public bool Soft;            // damage and effect only: no knockback, hitstun or hit-stop
+        public bool ArmorBreak;      // gets past Guts armor
         public WeaponId Weapon;      // what it came from (None: fists or a hazard)
         public bool Sweet;           // a sweet-spot hit
 
@@ -637,10 +996,22 @@ public static partial class Simulation
             LaunchX = m.LaunchX;
             LaunchY = m.LaunchY;
             HitstunBonus = m.HitstunBonus;
+            Effect = m.Effect;
+            EffectN = m.EffectN;
             NoHitStop = false;
             MaxHitStop = false;
+            Soft = false;
+            ArmorBreak = false;
             Weapon = WeaponId.None;
             Sweet = false;
+        }
+
+        /// <summary>A row's hit flags: chip, soft and armor break.</summary>
+        public void Flags(WeaponRow row)
+        {
+            NoHitStop = row.Chip;
+            Soft = row.Soft;
+            ArmorBreak = row.ArmorBreak;
         }
 
         /// <summary>A sweet-spot hit: 1.25x damage and base knockback, the longest hit-stop.</summary>
@@ -653,7 +1024,7 @@ public static partial class Simulation
         }
     }
 
-    /// <summary>A fighter's move connects: fists, or a melee weapon (belan, bat, shotgun).</summary>
+    /// <summary>A fighter's move connects: fists, or a weapon's swing or blast.</summary>
     private static void ApplyHit(GameState state, int attacker, int target, MoveId move, MatchRules rules)
     {
         Fighter[] fighters = state.Fighters;
@@ -670,10 +1041,12 @@ public static partial class Simulation
         if (reachesBehind && def.Position.X != atk.Position.X) side = def.Position.X > atk.Position.X ? 1 : -1;
 
         WeaponId weapon = WeaponId.None;
-        if (move == MoveId.BelanBonk || move == MoveId.BatSwing || move == MoveId.ShotgunBlast)
+        WeaponRow? row = Weapons.RowOfMove(move);
+        if (row != null)
         {
             weapon = atk.Weapon;
-            MeleeWeaponHit(ref atk, in def, move, ref hit, rules);
+            hit.Flags(row);
+            MeleeWeaponHit(ref atk, in def, row, ref hit, rules);
         }
         if (weapon != WeaponId.None && rules.SignatureOf(attacker) == weapon) hit.Percent = hit.Percent * Weapons.SignaturePercent / 100;
         hit.Weapon = weapon;
@@ -681,44 +1054,44 @@ public static partial class Simulation
     }
 
     /// <summary>
-    /// A melee weapon's sweet spot and quirks. Belan: bonking someone in the middle of their own
-    /// attack dizzies them longer. Bat: the very tip (1.3 m or more away) launches flat, the "six".
-    /// Shotgun: point blank (within 1.2 m) is the sweet spot; beyond 3 m it does only 10. Belan and
-    /// bat lose a hit of durability.
+    /// A swing's or a blast's row rules. A row that spends per hit loses one. Beyond its far
+    /// distance a blast does its far damage (the shotgun past 3 m). Otherwise its sweet spot:
+    /// hitting someone in the middle of their own attack, the tip (at least so far away), point
+    /// blank (at most so far), a target in the air, or a target facing away from the attacker (from
+    /// behind). A sweet hit is 1.25x; the row may also give it its own launch angle (the bat's flat
+    /// "six") and extra hitstun (the belan's dizzy).
     /// </summary>
-    private static void MeleeWeaponHit(ref Fighter atk, in Fighter def, MoveId move, ref Hit hit, MatchRules rules)
+    private static void MeleeWeaponHit(ref Fighter atk, in Fighter def, WeaponRow row, ref Hit hit, MatchRules rules)
     {
         FixRect hurt = Hurtbox(in def, rules.Tuning);
         Fix near = atk.Facing > 0 ? hurt.MinX - atk.Position.X : atk.Position.X - hurt.MaxX;
-        if (move == MoveId.BelanBonk)
+        if (row.Spend == WeaponSpend.Hit && atk.WeaponSupply > 0) atk.WeaponSupply--;
+
+        bool sweet = false;
+        if (row.FarDamage > 0 && near > row.FarDist) hit.Damage = row.FarDamage;
+        else if (row.Sweet == WeaponSweet.Midattack) sweet = def.Action == FighterAction.Attack;
+        else if (row.Sweet == WeaponSweet.Tip) sweet = near >= Fix.FromRaw(row.SweetArg);
+        else if (row.Sweet == WeaponSweet.Pointblank) sweet = near <= Fix.FromRaw(row.SweetArg);
+        else if (row.Sweet == WeaponSweet.Airborne) sweet = !def.Grounded;
+        else if (row.Sweet == WeaponSweet.Back)
+            sweet = def.Facing == (def.Position.X > atk.Position.X ? 1 : def.Position.X < atk.Position.X ? -1 : atk.Facing);
+        if (row.SweetOnly && !sweet) hit.Effect = WeaponEffect.None; // the Chimta disarms with its tip only
+        if (!sweet) return;
+
+        hit.Sweeten();
+        if (row.SweetLaunchX != Fix.Zero || row.SweetLaunchY != Fix.Zero)
         {
-            if (atk.WeaponSupply > 0) atk.WeaponSupply--;
-            if (def.Action == FighterAction.Attack)
-            {
-                hit.Sweeten();
-                hit.HitstunBonus += 6;
-            }
+            hit.LaunchX = row.SweetLaunchX;
+            hit.LaunchY = row.SweetLaunchY;
         }
-        else if (move == MoveId.BatSwing)
-        {
-            if (atk.WeaponSupply > 0) atk.WeaponSupply--;
-            if (near >= Weapons.BatTip)
-            {
-                hit.Sweeten();
-                hit.LaunchX = Weapons.SixLaunchX;
-                hit.LaunchY = Weapons.SixLaunchY;
-            }
-        }
-        else
-        {
-            if (near > Weapons.ShotgunFar) hit.Damage = Weapons.ShotgunFarDamage;
-            else if (near <= Weapons.PointBlank) hit.Sweeten();
-        }
+        hit.HitstunBonus += row.SweetStun;
     }
 
     /// <summary>
-    /// Applies a hit: rage, the hidden second wind, Josh, hit-stop, Guts, then knockback in
-    /// direction <paramref name="side"/>. Projectiles don't freeze their owner.
+    /// Applies a hit: rage, sweet and signature percent, the mark's 125%, the hidden second wind,
+    /// Josh, the last-hit record and stats, hit-stop (not for chip or soft hits), Guts, the armor
+    /// check (skipped by armor break), the row's effect, and then, unless the hit is soft or a hold
+    /// took, knockback in direction <paramref name="side"/>. Projectiles don't freeze their owner.
     /// </summary>
     private static void LandHit(GameState state, int attacker, int target, in Hit hit, int side, bool freezeAttacker, MatchRules rules)
     {
@@ -730,6 +1103,7 @@ public static partial class Simulation
         int rage = RageMultiplier(atk.Josh, rules);
         int damage = hit.Damage * rage / 100;
         if (hit.Percent != 100) damage = damage * hit.Percent / 100;
+        if (def.MarkFrames > 0) damage = damage * Weapons.MarkPercent / 100; // marked: 25% more from every hit
 
         // The hidden second wind soaks damage first.
         int absorbed = Math32.Min(def.Shield, damage);
@@ -740,14 +1114,8 @@ public static partial class Simulation
         def.LastHitWeapon = hit.Weapon;
         def.LastHitSweet = hit.Sweet;
         def.HitCount++;
-        if (attacker != target)
-        {
-            // The attacker's record with this weapon, for the winner's nickname.
-            int stats = (attacker * Weapons.Count + (int)hit.Weapon) * 3;
-            state.WeaponStats[stats] += damage;
-            if (hit.Sweet) state.WeaponStats[stats + 2]++;
-        }
-        if (!hit.NoHitStop)
+        if (attacker != target) RecordHit(state, attacker, hit.Weapon, damage, hit.Sweet); // for the winner's nickname
+        if (!hit.NoHitStop && !hit.Soft)
         {
             int stop = hit.MaxHitStop ? rules.MaxHitStop : HitStopFrames(damage, rules);
             if (freezeAttacker) atk.HitStop = Math32.Max(atk.HitStop, stop);
@@ -761,10 +1129,16 @@ public static partial class Simulation
             def.GutsTimer = rules.GutsDelayFrames;
         }
 
-        if (def.ArmorFrames > 0) return; // Guts armor: takes the Josh, keeps its footing
+        if (def.ArmorFrames > 0 && !hit.ArmorBreak) return; // Guts armor: takes the Josh, keeps its footing, gets no status
+
+        bool held = hit.Effect != WeaponEffect.None && ApplyEffect(state, attacker, target, in hit, damage, rules);
+        if (hit.Soft || held) return; // a soft hit, or a hold instead of knockback
 
         // A dodge cut short by a hit still costs its cooldown (the dodge would have set it on ending).
         if (def.Action == FighterAction.Dodge) def.DodgeCooldown = rules.Tuning.DodgeCooldownFrames;
+        def.RootFrames = 0; // a hit with knockback ends any hold
+        def.StunWeapon = 0;
+        if (hit.Effect == WeaponEffect.Reel) side = -side; // reeled in: launched towards the attacker
 
         Fix kb = hit.BaseKnockback + hit.KnockbackGrowth * def.Josh;
         if (rage != 100) kb = kb * rage / 100;
@@ -779,18 +1153,165 @@ public static partial class Simulation
         def.RecoveryUsed = false;
     }
 
+    /// <summary>
+    /// What a hit adds (combat spec v0.4, section 2.4). True when a hold took, which replaces the
+    /// hit's knockback. A hold (root, stun, freeze) takes only on a fighter who is on the ground,
+    /// not stun-immune and not in Guts armor; on one in the air the hit is an ordinary hit and adds
+    /// slow of the same length instead.
+    /// </summary>
+    private static bool ApplyEffect(GameState state, int attacker, int target, in Hit hit, int damage, MatchRules rules)
+    {
+        ref Fighter def = ref state.Fighters[target];
+        int n = hit.EffectN;
+        bool canHold = def.Grounded && def.StunImmune == 0 && def.ArmorFrames == 0;
+        switch (hit.Effect)
+        {
+            case WeaponEffect.Slow:
+                AddSlow(ref def, n);
+                return false;
+            case WeaponEffect.Chill:
+                // Chill builds up as slow; enough of it on someone standing freezes them solid.
+                AddSlow(ref def, n);
+                if (def.SlowFrames < Weapons.FreezeAt || !canHold) return false;
+                Stun(ref def, Weapons.FreezeFrames, hit.Weapon, rules);
+                def.SlowFrames = 0;
+                def.StunImmune = Weapons.FreezeImmuneFrames;
+                return true;
+            case WeaponEffect.Root:
+            case WeaponEffect.Stun:
+            case WeaponEffect.Slip:
+                if (!canHold)
+                {
+                    if (!def.Grounded) AddSlow(ref def, n);
+                    return false;
+                }
+                if (hit.Effect == WeaponEffect.Root)
+                {
+                    def.RootFrames = n;
+                    def.StunWeapon = (int)hit.Weapon;
+                }
+                else if (hit.Effect == WeaponEffect.Slip) Slip(ref def, n, hit.Weapon, rules);
+                else Stun(ref def, n, hit.Weapon, rules);
+                def.StunImmune = n + Weapons.HoldImmuneFrames;
+                return true;
+            case WeaponEffect.Disarm:
+                Disarm(state, target);
+                return false;
+            case WeaponEffect.Poison:
+            case WeaponEffect.Burn:
+                // Never stacks: the longer of the two, credited to the newest.
+                def.DotFrames = Math32.Max(def.DotFrames, n);
+                def.DotBy = attacker + 1;
+                def.DotWeapon = (int)hit.Weapon;
+                return false;
+            case WeaponEffect.Mark:
+                def.MarkFrames = Math32.Max(def.MarkFrames, n);
+                return false;
+            case WeaponEffect.Leech:
+                ref Fighter atk = ref state.Fighters[attacker];
+                atk.Josh = Math32.Max(0, atk.Josh - damage);
+                return false;
+            case WeaponEffect.Swap:
+                Swap(state, attacker, target, rules);
+                return false;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// The swap (the Swap Ray): the attacker (the shot's owner) and the target change places, both
+    /// standing still, if both spots are safe (<see cref="SafeSpot"/>). Otherwise nothing happens
+    /// but the damage. The shooter's own mines and bombs are no part of the test: swapping someone
+    /// onto them is the trick.
+    /// </summary>
+    private static void Swap(GameState state, int attacker, int target, MatchRules rules)
+    {
+        if (attacker == target) return;
+        ref Fighter a = ref state.Fighters[attacker];
+        ref Fighter b = ref state.Fighters[target];
+        if (!a.IsActive || !SafeSpot(state, rules, a.Position) || !SafeSpot(state, rules, b.Position)) return;
+        FixVec2 at = a.Position;
+        bool grounded = a.Grounded;
+        a.Position = b.Position;
+        a.Grounded = b.Grounded;
+        b.Position = at;
+        b.Grounded = grounded;
+        a.Velocity = FixVec2.Zero;
+        b.Velocity = FixVec2.Zero;
+    }
+
+    private static void AddSlow(ref Fighter f, int frames) => f.SlowFrames = Math32.Min(Weapons.SlowCapFrames, f.SlowFrames + frames);
+
+    /// <summary>
+    /// A slip: a stun hold, sliding the way the fighter faces at 0.3 m a frame, which ground
+    /// friction brings to a stop in about 2.3 m. Off a ledge the hold ends (FreeIfAirborne).
+    /// </summary>
+    private static void Slip(ref Fighter f, int frames, WeaponId weapon, MatchRules rules)
+    {
+        Stun(ref f, frames, weapon, rules);
+        f.Velocity.X = Weapons.SlipSpeed * f.Facing;
+    }
+
+    /// <summary>
+    /// The disarm: the target's weapon drops at its feet as a loose weapon with the supply it had,
+    /// ignoring the target for 1 s, and its burst and streak counters are cleared. Nothing happens
+    /// if it has no weapon, an empty one, or no prop slot is free.
+    /// </summary>
+    private static void Disarm(GameState state, int target)
+    {
+        ref Fighter def = ref state.Fighters[target];
+        if (def.Weapon == WeaponId.None) return;
+        if (def.WeaponSupply <= 0 && WeaponTable.Rows[(int)def.Weapon].Spend != WeaponSpend.Never) return;
+        int slot = FreeSlot(state, forShot: false);
+        if (slot < 0) return;
+        state.Props[slot] = new Prop
+        {
+            Kind = PropKind.Item,
+            Weapon = def.Weapon,
+            Supply = def.WeaponSupply,
+            Owner = -1,
+            Position = def.Position,
+            Grounded = def.Grounded,
+            IgnoreFighter = target + 1,
+            IgnoreTimer = Weapons.NoSwapBackFrames,
+        };
+        def.Weapon = WeaponId.None;
+        def.WeaponSupply = 0;
+        def.BurstShots = 0;
+        def.Streak = 0;
+        def.StreakTarget = 0;
+    }
+
+    /// <summary>
+    /// A stun hold, as a parried attacker is stunned: move cleared, sideways speed zero, no rising.
+    /// The weapon is kept in <see cref="Fighter.StunWeapon"/>, which is how the client draws it.
+    /// </summary>
+    private static void Stun(ref Fighter f, int frames, WeaponId weapon, MatchRules rules)
+    {
+        if (f.Action == FighterAction.Dodge) f.DodgeCooldown = rules.Tuning.DodgeCooldownFrames;
+        f.Action = FighterAction.Stunned;
+        f.Move = MoveId.None;
+        f.FlurryNext = MoveId.None;
+        f.ActionFrame = 0;
+        f.HitstunFrames = frames;
+        f.Velocity = new FixVec2(Fix.Zero, Fix.Min(f.Velocity.Y, Fix.Zero));
+        f.StunWeapon = (int)weapon;
+    }
+
     private static void CheckBlastZone(GameState state, int index, MatchRules rules)
     {
         Fighter[] fighters = state.Fighters;
         ref Fighter f = ref fighters[index];
         if (!f.IsActive || rules.Stage.BlastZone.Contains(f.Position)) return;
 
-        // The KO goes to whoever hit this fighter last, if that was recent; a lone fall scores none.
+        // The KO goes to whoever hit this fighter last, if that was recent; a lone fall scores none,
+        // and so does a fall a teammate set up (whatever path set the credit).
         f.Falls++;
-        if (f.LastHitTimer > 0 && f.LastHitBy > 0 && f.LastHitBy - 1 != index)
+        if (f.LastHitTimer > 0 && f.LastHitBy > 0 && !Allies(rules, f.LastHitBy - 1, index))
         {
             fighters[f.LastHitBy - 1].Kos++;
-            state.WeaponStats[((f.LastHitBy - 1) * Weapons.Count + (int)f.LastHitWeapon) * 3 + 1]++; // the weapon's KO
+            int slot = RecordSlot(state, f.LastHitBy - 1, f.LastHitWeapon);
+            if (slot >= 0) state.WeaponStats[slot + 2]++; // the weapon's KO, if the record still holds it
         }
         f.LastHitBy = 0;
         f.LastHitTimer = 0;
@@ -806,6 +1327,7 @@ public static partial class Simulation
         f.GutsTimer = 0; // losing the stock cancels a pending Guts
         f.ArmorFrames = 0;
         f.Shield = 0;
+        f.ClearStatuses();
         f.Action = timed || f.Stocks > 0 ? FighterAction.Respawning : FighterAction.Eliminated;
     }
 
@@ -815,7 +1337,7 @@ public static partial class Simulation
         {
             if (state.Frame + 1 < rules.TimeLimitFrames) return;
             state.MatchOver = true;
-            state.WinnerIndex = TimedWinner(state.Fighters);
+            state.WinnerIndex = rules.HasTeams() ? TimedTeamWinner(state.Fighters, rules) : TimedWinner(state.Fighters);
             return;
         }
 
@@ -836,29 +1358,89 @@ public static partial class Simulation
         }
     }
 
+    /// <summary>Where the slot holding this weapon starts in <see cref="GameState.WeaponStats"/>, or -1.</summary>
+    private static int RecordSlot(GameState state, int fighter, WeaponId weapon)
+    {
+        int from = fighter * Weapons.RecordInts;
+        for (int k = 0; k < Weapons.RecordSlots; k++)
+            if (state.WeaponStats[from + k * Weapons.RecordSlotInts] == (int)weapon + 1) return from + k * Weapons.RecordSlotInts;
+        return -1;
+    }
+
+    /// <summary>
+    /// A hit on someone else goes into the attacker's record: the total, and the slot of the weapon
+    /// it is credited to (None: fists). A weapon with no slot takes the first empty one; with none
+    /// empty it takes over the slot with the least damage (the lowest on a tie), cleared.
+    /// </summary>
+    private static void RecordHit(GameState state, int fighter, WeaponId weapon, int damage, bool sweet)
+    {
+        int[] record = state.WeaponStats;
+        int from = fighter * Weapons.RecordInts;
+        record[from + Weapons.RecordSlots * Weapons.RecordSlotInts] += damage;
+        int slot = RecordSlot(state, fighter, weapon);
+        if (slot < 0)
+        {
+            slot = from;
+            for (int k = 0; k < Weapons.RecordSlots; k++)
+            {
+                int at = from + k * Weapons.RecordSlotInts;
+                if (record[at] == 0)
+                {
+                    slot = at;
+                    break;
+                }
+                if (record[at + 1] < record[slot + 1]) slot = at;
+            }
+            record[slot] = (int)weapon + 1;
+            record[slot + 1] = 0;
+            record[slot + 2] = 0;
+            record[slot + 3] = 0;
+        }
+        record[slot + 1] += damage;
+        if (sweet) record[slot + 3]++;
+    }
+
+    /// <summary>
+    /// A fighter's record with a weapon (None: fists): <paramref name="stat"/> 0 is the damage dealt
+    /// to others, 1 the KOs, 2 the sweet-spot hits. 0 for a weapon the record holds no slot for.
+    /// </summary>
+    public static int WeaponStat(GameState state, int fighter, WeaponId weapon, int stat)
+    {
+        int slot = RecordSlot(state, fighter, weapon);
+        return slot < 0 ? 0 : state.WeaponStats[slot + 1 + stat];
+    }
+
+    /// <summary>All the damage a fighter has done to others, with anything.</summary>
+    public static int DamageDealt(GameState state, int fighter) =>
+        state.WeaponStats[fighter * Weapons.RecordInts + Weapons.RecordSlots * Weapons.RecordSlotInts];
+
     /// <summary>
     /// A fighter's main weapon in this match, for their nickname: the weapon (0 is fists) that did
-    /// the most of their damage, if that is at least 40% of it; otherwise -1, an all-rounder.
-    /// <paramref name="master"/>: they also landed 3 or more sweet spots and a KO with it.
+    /// the most of their damage (the lower id on a tie), if that is at least 40% of all the damage
+    /// they did; otherwise -1, an all-rounder. <paramref name="master"/>: they also landed 3 or
+    /// more sweet spots and a KO with it.
     /// </summary>
     public static int MainWeapon(GameState state, int fighter, out bool master)
     {
         master = false;
-        int total = 0, best = -1, bestDamage = 0;
-        int from = fighter * Weapons.Count * 3;
-        for (int w = 0; w < Weapons.Count; w++)
+        int[] record = state.WeaponStats;
+        int from = fighter * Weapons.RecordInts;
+        int best = -1, bestWeapon = -1, bestDamage = 0;
+        for (int k = 0; k < Weapons.RecordSlots; k++)
         {
-            int damage = state.WeaponStats[from + w * 3];
-            total += damage;
-            if (damage > bestDamage)
+            int at = from + k * Weapons.RecordSlotInts;
+            if (record[at] == 0) continue;
+            int weapon = record[at] - 1, damage = record[at + 1];
+            if (damage > bestDamage || (damage == bestDamage && damage > 0 && weapon < bestWeapon))
             {
-                best = w;
+                best = at;
+                bestWeapon = weapon;
                 bestDamage = damage;
             }
         }
-        if (best < 0 || bestDamage * 100 < total * 40) return -1;
-        master = state.WeaponStats[from + best * 3 + 2] >= 3 && state.WeaponStats[from + best * 3 + 1] >= 1;
-        return best;
+        if (best < 0 || bestDamage * 100 < DamageDealt(state, fighter) * 40) return -1;
+        master = record[best + 3] >= 3 && record[best + 2] >= 1;
+        return bestWeapon;
     }
 
     /// <summary>
@@ -929,6 +1511,55 @@ public static partial class Simulation
         return tied ? -1 : best;
     }
 
+    /// <summary>
+    /// A timed team match's winner (rooms v1, section 1.7): the team with the most KOs, then the
+    /// fewest falls, summed over its members (a team-0 fighter is a team of one); -1 if the best
+    /// two teams are level on both. Otherwise that team's MVP: the most KOs, then the fewest
+    /// falls, then the lowest index.
+    /// </summary>
+    public static int TimedTeamWinner(Fighter[] fighters, MatchRules rules)
+    {
+        int n = fighters.Length;
+        Span<int> kos = stackalloc int[n];
+        Span<int> falls = stackalloc int[n];
+        Span<int> leader = stackalloc int[n];
+        for (int i = 0; i < n; i++)
+        {
+            int j = 0;
+            while (!Allies(rules, i, j)) j++; // the lowest index on i's team (i itself at worst)
+            leader[i] = j;
+            kos[j] += fighters[i].Kos;
+            falls[j] += fighters[i].Falls;
+        }
+
+        int best = -1;
+        bool tied = false;
+        for (int i = 0; i < n; i++)
+        {
+            if (leader[i] != i) continue;
+            if (best < 0) { best = i; continue; }
+            if (kos[i] > kos[best] || (kos[i] == kos[best] && falls[i] < falls[best]))
+            {
+                best = i;
+                tied = false;
+            }
+            else if (kos[i] == kos[best] && falls[i] == falls[best])
+            {
+                tied = true;
+            }
+        }
+        if (best < 0 || tied) return -1;
+
+        int mvp = -1;
+        for (int i = 0; i < n; i++)
+        {
+            if (leader[i] != best) continue;
+            if (mvp < 0 || fighters[i].Kos > fighters[mvp].Kos || (fighters[i].Kos == fighters[mvp].Kos && fighters[i].Falls < fighters[mvp].Falls))
+                mvp = i;
+        }
+        return mvp;
+    }
+
     private static void Spawn(ref Fighter f, int index, MatchRules rules)
     {
         var spawns = rules.Stage.SpawnPoints;
@@ -956,10 +1587,11 @@ public static partial class Simulation
         f.LastHitTimer = 0;
         f.Weapon = WeaponId.None;
         f.WeaponSupply = 0;
-        f.UziShots = 0;
-        f.UziStreak = 0;
-        f.UziTarget = 0;
+        f.BurstShots = 0;
+        f.Streak = 0;
+        f.StreakTarget = 0;
         f.FlurryNext = MoveId.None;
+        f.ClearStatuses();
     }
 }
 

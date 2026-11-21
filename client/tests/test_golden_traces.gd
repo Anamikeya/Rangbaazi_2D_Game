@@ -14,9 +14,12 @@ func _replay(file_name: String) -> void:
 	var g: Dictionary = JSON.parse_string(text)
 	var rules := MatchRules.new()
 	var time_limit := int(g.get("time_limit_frames", 0))
-	if time_limit > 0: # a room scenario: MatchRules.room with a short clock
-		rules = MatchRules.room(StageDefinition.by_id(str(g["stage"])), 1)
+	if time_limit > 0: # a room scenario: MatchRules.room with a short clock, on the big level for "stage_size": "big"
+		var stage_size := StageDefinition.SIZE_BIG if str(g.get("stage_size", "normal")) == "big" else StageDefinition.SIZE_NORMAL
+		rules = MatchRules.room(StageDefinition.by_id(str(g["stage"]), stage_size), 1)
 		rules.time_limit_frames = time_limit
+	else:
+		rules.stocks = int(g.get("stocks", 3))
 	rules.guts = g["guts"]
 	rules.weapons = bool(g.get("weapons", false))
 	rules.flurry = bool(g.get("flurry", false))
@@ -25,6 +28,10 @@ func _replay(file_name: String) -> void:
 	for w in g.get("signatures", []):
 		sigs.append(int(w))
 	rules.signatures = sigs
+	var teams := PackedInt32Array()
+	for team in g.get("teams", []):
+		teams.append(int(team))
+	rules.teams = teams
 	var players := int(g["players"])
 	var state := Simulation.create_initial_state(rules, players, int(g["seed"]))
 	if not check_eq(StateHasher.hex(state.checksum()), g["initial"], "%s initial checksum" % file_name):
@@ -34,12 +41,22 @@ func _replay(file_name: String) -> void:
 	inputs.resize(players)
 	var steps: Array = g["steps"]
 	var arm_newer := bool(g.get("arm_newer", false))
+	var arm_every := int(g.get("arm_every", 0))
+	var crates := Weapons.crate_list()
+	var arm_lists: Array = g.get("arm_lists", []) # per fighter p, arm_lists[p % size] instead of the crate list
 	for f in steps.size():
 		var step: Array = steps[f]
 		if arm_newer and f % 90 == 0: # every fighter is handed one of the five newer weapons
 			for p in players:
 				if state.fighters[p].is_active():
 					var w := Weapons.BOOMERANG + (f / 90 + p) % 5
+					state.fighters[p].weapon = w
+					state.fighters[p].weapon_supply = Weapons.supply_of(w)
+		if arm_every > 0 and f % arm_every == 0: # every fighter is handed the next weapon a crate can hold
+			for p in players:
+				if state.fighters[p].is_active():
+					var list: Array = arm_lists[p % arm_lists.size()] if not arm_lists.is_empty() else Array(crates)
+					var w := int(list[(f / arm_every + p) % list.size()])
 					state.fighters[p].weapon = w
 					state.fighters[p].weapon_supply = Weapons.supply_of(w)
 		var expected_inputs: Array = step[0]
@@ -107,17 +124,48 @@ func test_newer_weapons_bots_four_players() -> void:
 	_replay("newer_weapons_bots_4p")
 
 
+func test_all_weapons_random_inputs_four_players() -> void:
+	_replay("all_weapons_random_4p")
+
+
+func test_all_weapons_bots_four_players() -> void:
+	_replay("all_weapons_bots_4p")
+
+
+func test_all_weapons_room_six_players() -> void:
+	_replay("all_weapons_room_6p")
+
+
+func test_all_weapons_two_teams_of_three() -> void:
+	_replay("all_weapons_teams_6p")
+
+
+## Fifteen fighters all firing: the placed limit of a big room (2), a full prop table, a shot put over
+## a bullet or its firer's own placed prop, and shots that fizzle (GoldenTraceTests checks it plays them).
+func test_big_room_prop_table_fifteen_players() -> void:
+	_replay("big_room_props_15p")
+
+
+## Four teams of 15 CPUs on the big level (rooms v1, 6.2), weapons and hazards on.
+func test_room_big_teams_15p() -> void:
+	_replay("room_big_teams_15p")
+
+
+## Every arena at both sizes: "<id>" and "<id>@big" (StageDefinition.big, StageScaling.Big).
 func test_arena_stages_match_the_reference() -> void:
 	var text := FileAccess.get_file_as_string("res://tests/golden/arena_stages.json")
 	if not check(text != "", "missing golden arena_stages.json"):
 		return
 	var expected: Dictionary = JSON.parse_string(text)
-	check_eq(expected.size(), ArenaStages.IDS.size(), "arena count")
+	check_eq(expected.size(), 2 * ArenaStages.IDS.size(), "arena count, both sizes")
 	for e: Array in ArenaStages.IDS:
-		var s := ArenaStages.by_id(e[0])
-		var h := StateHasher.new()
-		s.add_to(h)
-		check_eq(StateHasher.hex(h.value()), expected.get(e[0], ""), "arena %s" % e[0])
+		for stage_size: int in [StageDefinition.SIZE_NORMAL, StageDefinition.SIZE_BIG]:
+			var s := StageDefinition.by_id(e[0], stage_size)
+			check_eq(s.size, stage_size, "arena %s size" % e[0])
+			var key: String = e[0] + ("@big" if stage_size == StageDefinition.SIZE_BIG else "")
+			var h := StateHasher.new()
+			s.add_to(h)
+			check_eq(StateHasher.hex(h.value()), expected.get(key, ""), "arena %s" % key)
 
 
 func test_hasher_matches_reference_values() -> void:

@@ -26,6 +26,20 @@ static var seen_help := false
 ## Volumes, 0 to 1: the music and ambience, and everything else.
 static var music_volume := 0.7
 static var effects_volume := 0.9
+## The touch controls (TouchControls reads both): how big (a factor on their sizes and their
+## distances from the corners) and how solid (a factor on their fills' and rings' opacity).
+## Small / Medium / Large and Low / Medium / High in Settings (rooms v1, fix 20).
+const TOUCH_SCALES := [0.85, 1.0, 1.15]
+const TOUCH_ALPHAS := [0.55, 1.0, 1.8]
+static var touch_scale := 1.0
+static var touch_alpha := 1.0
+## The host's last room choices, used when they host the next room (rooms v1, polish 4): the mode
+## chip (0 free-for-all, or 2 to 4 teams) and the match length in minutes.
+const ROOM_TEAM_CHOICES := [0, 2, 3, 4]
+const ROOM_MINUTES_MIN := 10
+const ROOM_MINUTES_MAX := 15
+static var room_teams := 0
+static var room_minutes := 10
 
 static var _loaded := false
 
@@ -54,6 +68,39 @@ static func load_settings() -> void:
 	show_debug = bool(cfg.get_value("graphics", "show_debug", false))
 	music_volume = clampf(float(cfg.get_value("sound", "music", 0.7)), 0.0, 1.0)
 	effects_volume = clampf(float(cfg.get_value("sound", "effects", 0.9)), 0.0, 1.0)
+	touch_scale = _one_of(float(cfg.get_value("touch", "scale", 1.0)), TOUCH_SCALES)
+	touch_alpha = _one_of(float(cfg.get_value("touch", "alpha", 1.0)), TOUCH_ALPHAS)
+	room_teams = room_teams_choice(int(cfg.get_value("room", "teams", 0)))
+	room_minutes = room_minutes_choice(int(cfg.get_value("room", "minutes", ROOM_MINUTES_MIN)))
+
+
+## A saved team choice if it is one of the mode chips' (0, 2, 3, 4), else free-for-all.
+static func room_teams_choice(value: int) -> int:
+	return value if ROOM_TEAM_CHOICES.has(value) else 0
+
+
+## A saved match length kept to the lobby slider's 10 to 15 minutes.
+static func room_minutes_choice(value: int) -> int:
+	return clampi(value, ROOM_MINUTES_MIN, ROOM_MINUTES_MAX)
+
+
+## Remembers the host's choice (the lobby's mode chips or minutes slider) and saves it if it changed.
+static func remember_room(teams: int, minutes: int) -> void:
+	var t := room_teams_choice(teams)
+	var m := room_minutes_choice(minutes)
+	if t == room_teams and m == room_minutes:
+		return
+	room_teams = t
+	room_minutes = m
+	save()
+
+
+## The value if it is one of the choices, else the middle one (Medium).
+static func _one_of(value: float, choices: Array) -> float:
+	for c: float in choices:
+		if is_equal_approx(c, value):
+			return c
+	return choices[1]
 
 
 static func save() -> void:
@@ -71,6 +118,10 @@ static func save() -> void:
 	cfg.set_value("graphics", "show_debug", show_debug)
 	cfg.set_value("sound", "music", music_volume)
 	cfg.set_value("sound", "effects", effects_volume)
+	cfg.set_value("touch", "scale", touch_scale)
+	cfg.set_value("touch", "alpha", touch_alpha)
+	cfg.set_value("room", "teams", room_teams)
+	cfg.set_value("room", "minutes", room_minutes)
 	cfg.save(PATH)
 
 

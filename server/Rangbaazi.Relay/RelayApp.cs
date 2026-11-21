@@ -158,8 +158,8 @@ public static class RelayApp
         if (version < ArenaLimits.ProtocolVersion)
         {
             arena.LogJoinRejected("old client", arena.RoomCount);
-            await relay.RejectAsync(socket, RelayMessages.Error("This copy of the game is out of date: refresh the page or install the new app."),
-                RelayCloseCodes.BadCode, "old client").ConfigureAwait(false);
+            await relay.RejectAsync(socket, ArenaMessages.Error("old_client", "This copy of the game is out of date: refresh the page or install the new app."),
+                RelayCloseCodes.BadCode, "old_client").ConfigureAwait(false); // the reason is the code: a client may get only the close
             return;
         }
 

@@ -26,7 +26,7 @@ The code is in two places: the C# reference in `src/Rangbaazi.Sim/Weapons.cs` an
 | Bat, shotgun, ball speed | 16 / 12 / 20 startup | **12 / 12 / 14 startup**, with shorter recoveries |
 | Picking up | any time | **not during your own attack**, so a weapon can't change in the middle of a move |
 | Fist flurry | in v0.2 | **built 2026-11-19**, as v0.2 specifies (`MatchRules.Flurry`; on in practice, duels and rooms) |
-| Winner nicknames by weapon | in v0.2 | **not built yet** (see the end) |
+| Winner nicknames by weapon | in v0.2 | **built 2026-11-21** with v0.4 (see the end) |
 
 Everything else in v0.2 is built as written:
 
@@ -154,8 +154,14 @@ Measured, not played: four Hard CPUs for a minute on Rooftops and the graybox, s
 
 These come from v0.2 and the GDD:
 
-- weapon swing animations from the art pack (the game borrows a fist move's poses for now);
-- hit reactions drawn on the fighter (dizzy stars, soot);
+- weapon swing animations from the art pack (the game still borrows a fist move's poses, one of four per weapon);
 - hazards that slip, slow or break (they push or hit for now);
-- the other 88 weapons;
 - match settings to turn weapons or hazards off.
+
+Built since (2026-11-21), in `combat-spec-v0.4-all-weapons.md`:
+
+- **the other 88 weapons**: all 100 of the art pack's weapons drop from crates, made from one table (`tools/weapons.json`), with statuses, sprays, lobs, guards, traps, zones, walls and machines; tuned by measurement in its batch 6;
+- **hit reactions on the fighter**: the statuses are drawn (a blue tint when slowed, colour splats, poison bubbles, flames, an ice block, sparks, a spin, a net or a trap's jaws);
+- **winner nicknames by weapon** (`client/game/nicknames.gd`, four words a weapon, from the table).
+
+The numbers in the tables above still hold for the twelve: v0.4 changed none of them (`WeaponTableTests` holds them to v0.3's). The other 88 weapons' numbers are in `tools/weapons.json`.

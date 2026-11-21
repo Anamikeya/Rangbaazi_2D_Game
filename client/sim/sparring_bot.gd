@@ -35,6 +35,10 @@ static var STOP_DISTANCE := Fx.ratio(1, 8)
 static var LANDING_MARGIN := Fx.HALF
 static var LUNGE_ROOM := Fx.ratio(3, 2)
 static var THREAT_PADDING := Fx.HALF
+## A weapon the bot throws (its row's cpuMax is -1) is thrown at an opponent lined up this close.
+static var THROW_RANGE := Fx.from_int(5)
+## The Crate Detonator is pressed again once an opponent is this close to one of the bot's crates.
+static var CRATE_NEAR := Fx.ratio(3, 2)
 
 
 ## [attack odds, reaction frames, dodge odds] per level.
@@ -58,7 +62,14 @@ static func think(state: GameState, rules: MatchRules, self_index: int, level: i
 	if me.hit_stop > 0:
 		return Buttons.NONE
 	if me.action == A_ATTACK:
-		if me.move == MoveData.Id.UZI_FIRE and me.uzi_shots < UZI_BURST:
+		# A repeating weapon or a spray: keep the button held for the row's burst (shots or ticks).
+		# Nothing else is held, so the Parat's guard never waits: its bash comes straight out.
+		var firing := WeaponTable.ROWS[Weapons.row_of_move(me.move)]
+		# A blink below the stage top is a recovery: Up stays held, so it lands on a platform above.
+		if firing[WeaponTable.C_USE] == WeaponTable.USE_BLINK:
+			return Buttons.UP if me.pos_y < stage.max_y else Buttons.NONE
+		var repeats: bool = firing[WeaponTable.C_INTERVAL] > 0 or firing[WeaponTable.C_USE] == WeaponTable.USE_SPRAY
+		if repeats and me.burst_shots < firing[WeaponTable.C_CPU_BURST]:
 			return Buttons.LIGHT
 		return _steer_during_move(me, stage, t)
 	if me.action != A_IDLE:
@@ -73,9 +84,9 @@ static func think(state: GameState, rules: MatchRules, self_index: int, level: i
 	# Recovery: off the sides of the main stage, or below its top surface.
 	var off_stage := me.pos_x < stage.min_x or me.pos_x > stage.max_x or (not me.grounded and me.pos_y < stage.max_y)
 	if off_stage:
-		return _recover(me, stage, can_jump, can_heavy, can_dodge)
+		return _recover(me, rules.stage, stage, can_jump, can_jab, can_heavy, can_dodge)
 
-	var target := _nearest_opponent(fighters, self_index)
+	var target := _nearest_opponent(state, self_index, rules)
 	if target < 0:
 		return Buttons.NONE
 	var op := fighters[target]
@@ -91,18 +102,35 @@ static func think(state: GameState, rules: MatchRules, self_index: int, level: i
 
 	var b := Buttons.NONE
 	var floor_index := _standing_on(me, rules.stage) if me.grounded else -1
+	# Armed with a weapon it shouldn't press at fist range now, on the ground or in the air: a
+	# Detonator whose crates are out (they would go off), or a row it only throws.
+	var armed := WeaponTable.ROWS[me.weapon]
+	var hold_fire: bool = me.weapon != Weapons.NONE and ((armed[WeaponTable.C_USE] == WeaponTable.USE_DETONATE and _owns_decoy(state, self_index)) \
+			or armed[WeaponTable.C_CPU_MAX] < 0)
 
 	# Weapons: empty-handed, fetch a box or loose weapon on the same platform; with a gun, the bow,
 	# the bombs or the ball, fire from range once lined up. Melee weapons fight like fists.
 	if rules.weapons and floor_index >= 0:
 		if me.weapon == Weapons.NONE:
-			var item := _nearest_item(state, me, self_index, rules.stage.platforms[floor_index])
+			var item := _nearest_item(state, rules, me, self_index, rules.stage.platforms[floor_index])
 			if item >= 0 and absi(dx) > JAB_RANGE:
 				var to_item := state.props[item].pos_x - me.pos_x
 				return Buttons.RIGHT if to_item > 0 else Buttons.LEFT
 		else:
-			var reach := _ranged_reach(me.weapon)
-			if reach > 0 and absi(dy) < Fx.ONE and absi(dx) <= reach and absi(dx) >= _ranged_min(me.weapon):
+			# The row's range: how far it is worth firing from (0: used like fists), and how close
+			# is too close (a lobbed bomb would land behind them, or on the bot).
+			var held := WeaponTable.ROWS[me.weapon]
+			if held[WeaponTable.C_USE] == WeaponTable.USE_DETONATE and hold_fire:
+				# Its crates are out: burst them once an opponent is beside one and the bot isn't.
+				if can_jab and _crate_sprung(state, rules, self_index, held):
+					return Buttons.LIGHT
+			elif held[WeaponTable.C_CPU_MAX] < 0:
+				# A row it throws (the Teleporter, kept for recovering when it is off the stage).
+				if absi(dy) < Fx.ONE and absi(dx) <= THROW_RANGE:
+					if me.facing != dir:
+						return toward
+					return Buttons.DROP_WEAPON if (last & Buttons.DROP_WEAPON) == 0 and not _hesitates(state.frame, self_index, skill[0]) else Buttons.NONE
+			elif held[WeaponTable.C_CPU_MAX] > 0 and absi(dy) < Fx.ONE and absi(dx) <= held[WeaponTable.C_CPU_MAX] and absi(dx) >= held[WeaponTable.C_CPU_MIN]:
 				if me.facing != dir:
 					return toward
 				return Buttons.LIGHT if can_jab and not _hesitates(state.frame, self_index, skill[0]) else Buttons.NONE
@@ -111,7 +139,9 @@ static func think(state: GameState, rules: MatchRules, self_index: int, level: i
 		var p: FxRect = rules.stage.platforms[floor_index]
 		b |= Buttons.LEFT if op.pos_x * 2 < p.min_x + p.max_x else Buttons.RIGHT
 	elif absi(dx) <= JAB_RANGE and _safe_to_attack(me, stage, t):
-		if me.facing != dir:
+		if hold_fire:
+			pass # nothing to press at fist range: it waits beside them
+		elif me.facing != dir:
 			b |= toward # turn to face them
 		elif absi(dy) < Fx.ONE and not _hesitates(state.frame, self_index, skill[0]):
 			# Lunge room is measured on whatever it stands on: a floating platform's end is an edge too.
@@ -157,38 +187,15 @@ static func _attack(me: Fighter, op: Fighter, ground: FxRect, t: FighterTuning, 
 	return Buttons.LIGHT if can_jab else Buttons.NONE
 
 
-## Uzi bullets the bot fires in one held burst.
-const UZI_BURST := 8
-
-
-## How far a shooting weapon is worth firing from (0: a melee weapon, used like fists).
-static func _ranged_reach(w: int) -> int:
-	match w:
-		Weapons.SHOTGUN: return Fx.from_int(4)
-		Weapons.UZI: return Fx.from_int(9)
-		Weapons.BOWLING_BALL: return Fx.from_int(12)
-		Weapons.CHERRY_BOMBS: return Fx.from_int(6)
-		Weapons.BOW: return Fx.from_int(15)
-		Weapons.BOOMERANG: return Fx.from_int(8)
-		Weapons.HOMING_MISSILE: return Fx.from_int(14)
-		Weapons.BLACK_HOLE_BOMB: return Fx.from_int(6)
-	return 0
-
-
-## Closer than this, lobbing a bomb would land it behind them (or on the bot).
-static func _ranged_min(w: int) -> int:
-	if w == Weapons.HOMING_MISSILE:
-		return Fx.from_int(3) # any closer and its burst catches the shooter
-	return Fx.ratio(5, 2) if w == Weapons.CHERRY_BOMBS or w == Weapons.BLACK_HOLE_BOMB else 0
-
-
-## The nearest box or loose weapon resting on this platform within 5 m, or -1.
-static func _nearest_item(state: GameState, me: Fighter, self_index: int, floor_rect: FxRect) -> int:
+## The nearest box or loose weapon resting on this platform within 5 m, or -1. A decoy looks like a
+## box to everyone but its owner's side, so the bot walks to those too.
+static func _nearest_item(state: GameState, rules: MatchRules, me: Fighter, self_index: int, floor_rect: FxRect) -> int:
 	var best := -1
 	var best_dist := 0
 	for i in state.props.size():
 		var p := state.props[i]
-		if (p.kind != Weapons.PROP_BOX and p.kind != Weapons.PROP_ITEM) or not p.grounded or p.ignore_fighter == self_index + 1:
+		var decoy := p.kind == Weapons.PROP_SHOT and p.shot == Weapons.SHOT_DECOY and (p.owner < 0 or not Simulation.allies(rules, self_index, p.owner))
+		if (p.kind != Weapons.PROP_BOX and p.kind != Weapons.PROP_ITEM and not decoy) or not p.grounded or p.ignore_fighter == self_index + 1:
 			continue
 		if p.pos_y != floor_rect.max_y or p.pos_x < floor_rect.min_x or p.pos_x > floor_rect.max_x:
 			continue
@@ -203,16 +210,54 @@ static func _nearest_item(state: GameState, me: Fighter, self_index: int, floor_
 
 ## Off the stage: steer home, air-jump, then up heavy, then air-dodge up and home, each saved
 ## until falling below the stage top.
-static func _recover(me: Fighter, stage: FxRect, can_jump: bool, can_heavy: bool, can_dodge: bool) -> int:
+static func _recover(me: Fighter, arena: StageDefinition, stage: FxRect, can_jump: bool, can_jab: bool, can_heavy: bool, can_dodge: bool) -> int:
 	var home := Buttons.RIGHT if me.pos_x < 0 else Buttons.LEFT
 	var falling := me.vel_y < 0 and me.pos_y < stage.max_y
 	if not falling:
 		return home
+	# A Teleporter with a blink left goes first, when there is a platform to blink onto (facing home).
+	var held := WeaponTable.ROWS[me.weapon]
+	if held[WeaponTable.C_USE] == WeaponTable.USE_BLINK and me.weapon_supply > 0:
+		var facing_home := Fighter.new()
+		facing_home.copy_from(me)
+		facing_home.facing = 1 if me.pos_x < 0 else -1
+		if not Simulation.blink_spot(arena, facing_home, held[WeaponTable.C_REACH], true).is_empty():
+			return home | Buttons.UP | Buttons.LIGHT if can_jab else home
 	if me.air_jumps_left > 0:
 		return home | Buttons.JUMP if can_jump else home
 	if not me.recovery_used:
 		return home | Buttons.UP | Buttons.HEAVY if can_heavy else home
 	return home | Buttons.UP | Buttons.DODGE if can_dodge else home
+
+
+## Whether the bot owns a decoy on the stage (a Crate Detonator's rigged crate, or a Decoy Crate).
+static func _owns_decoy(state: GameState, self_index: int) -> bool:
+	for p in state.props:
+		if p.kind == Weapons.PROP_SHOT and p.shot == Weapons.SHOT_DECOY and p.owner == self_index:
+			return true
+	return false
+
+
+## Time to burst its crates: an opponent stands within 1.5 m of one of the bot's decoys, and the bot
+## itself is clear (by a metre) of every one's blast, since they all go off together.
+static func _crate_sprung(state: GameState, rules: MatchRules, self_index: int, detonator: PackedInt64Array) -> bool:
+	var fighters := state.fighters
+	var me := fighters[self_index]
+	var clear: int = detonator[WeaponTable.C_BLAST] + Fx.ONE
+	for p in state.props:
+		if p.kind != Weapons.PROP_SHOT or p.shot != Weapons.SHOT_DECOY or p.owner != self_index:
+			continue
+		if absi(me.pos_x - p.pos_x) <= clear and absi(me.pos_y - p.pos_y) <= clear:
+			return false
+	for p in state.props:
+		if p.kind != Weapons.PROP_SHOT or p.shot != Weapons.SHOT_DECOY or p.owner != self_index:
+			continue
+		for d in fighters.size():
+			if Simulation.allies(rules, self_index, d) or not fighters[d].is_active():
+				continue
+			if absi(fighters[d].pos_x - p.pos_x) <= CRATE_NEAR and absi(fighters[d].pos_y - p.pos_y) < Fx.ONE:
+				return true
+	return false
 
 
 ## During a move the bot can steer (the up heavy), steer home if it is off the side.
@@ -235,8 +280,8 @@ static func _should_dodge(state: GameState, rules: MatchRules, self_index: int, 
 	var hb := Simulation.hurtbox(me, rules.tuning)
 
 	for i in fighters.size():
-		if i == self_index:
-			continue
+		if Simulation.allies(rules, self_index, i):
+			continue # itself, or a teammate's swing
 		var op := fighters[i]
 		var m := Simulation.current_move(op, rules.tuning)
 		if m == null or op.attack_connected or op.hit_stop > 0:
@@ -315,17 +360,23 @@ static func _standing_on(me: Fighter, stage: StageDefinition) -> int:
 	return -1
 
 
-static func _nearest_opponent(fighters: Array[Fighter], self_index: int) -> int:
+## The nearest fighter who is still in and isn't on the bot's team, or -1. A fighter hidden in a cloud is
+## only seen from 2 m or nearer.
+static func _nearest_opponent(state: GameState, self_index: int, rules: MatchRules) -> int:
+	var fighters := state.fighters
+	var seen := Fx.mul(Weapons.HIDDEN_SEEN, Weapons.HIDDEN_SEEN)
 	var at_x := fighters[self_index].pos_x
 	var at_y := fighters[self_index].pos_y
 	var best := -1
 	var best_dist := 0
 	for i in fighters.size():
-		if i == self_index or not fighters[i].is_active():
+		if Simulation.allies(rules, self_index, i) or not fighters[i].is_active():
 			continue
 		var dx := fighters[i].pos_x - at_x
 		var dy := fighters[i].pos_y - at_y
 		var d := Fx.mul(dx, dx) + Fx.mul(dy, dy)
+		if d > seen and Simulation.is_hidden(state, rules, i):
+			continue # hidden in a cloud: seen only from 2 m or nearer
 		if best < 0 or d < best_dist:
 			best = i
 			best_dist = d

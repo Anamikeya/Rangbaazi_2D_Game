@@ -13,6 +13,8 @@ var clip := "idle"
 var framed := true
 ## On: a move that doesn't loop plays again after a short pause (the character creator's poses).
 var replay := false
+## A ring round the picture in this colour instead of the usual frame; clear for none.
+var ring_color := Color(0, 0, 0, 0)
 var _painter: FighterPainter
 var _painter_id := ""
 var _frame := 0
@@ -58,5 +60,7 @@ func _draw() -> void:
 		if replay and not bool(move.get("loop", false)):
 			frame = _frame % (int(move.get("d", 1)) + 40)
 		_painter.draw(self, Vector2(size.x / 2, size.y * 0.92), size.y / 300.0, 1, clip, frame)
-	if framed:
+	if ring_color.a > 0.0:
+		draw_rect(r.grow(-3.0), ring_color, false, 6.0) # your team's colour (the room lobby)
+	elif framed:
 		draw_rect(r, Color(UiTheme.ACCENT, 0.8), false, 4.0)
